@@ -18,6 +18,9 @@ The easiest way to run the script is to leverage the shakemap environment:
 ```
 conda run -n shakemap python makeFinDerTemplates.py -e event.conf -g gmpe.conf -c calc.conf
 ```
+```
+conda run -n shakemap python makeScenarioStnData.py -e event.conf -g gmpe.conf -c calc.conf
+```
 Example configuration files are provided and should be edited before running the script. 
 
 ## Scaling Relations
@@ -33,11 +36,12 @@ Other scaling relations used in ShakeMap/OQ have not been extended to have magni
 ## GMPEs
 The setup of GMPEs uses the same concept of weighted sets as used in ShakeMap, but in gmpe.conf the user explicitly creates the set and weights (i.e. tectonic weighting is not altered with location/depth as the template set is not designed to be geographically positioned).
 
-## Depth
+## Earthquake Depth
 Configure the 'hypo_depth' as the value to be used as centroid in the rupture plane. Once fault width exceeds this depth and/or the seismogenic depth, the centroid depth may be altered within the script, with a note written to log.
 
-## Position/Distance
-The user only needs to supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler.
+## Computing Ground Motion at Position/Distance
+There are two wrapper scripts available, one designed to create FinDer templates, the other designed to create ground motion scenario data.
 
-## Asymmetric/Symmetric Templates
-The script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True.
+When using the FinDer template wrapper (makeFinDerTemplates.py), set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler. A fixed vs30 is used and is configured in the configuration file also.vThe script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True.
+
+When using the scenario wrapper (makeScenarioStnData.py), set the configuration parameter ["points"]["compute"] to True and set the path for a points file. That file should contain lines with space delimited fields: lat lon vs30 name. The first three columns will be used as input to the ground motion computation. The name will be used when generating a FinDer data_ file.
