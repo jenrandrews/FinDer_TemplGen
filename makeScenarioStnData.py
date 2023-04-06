@@ -34,6 +34,11 @@ if __name__ == "__main__":
     evconf = woq.importConfig(args.evconf)
     calcconf = woq.importConfig(args.calcconf)
 
+    inStrikes = np.arange(0., 180., 15.).tolist()
+    outStrikes = np.arange(0., 50., 15.).tolist()
+    outStrikes.extend(np.arange(135., 230., 15.).tolist())
+    outStrikes.extend(np.arange(315., 360., 15.).tolist())
+
     # Grid for event epicenters
     NZ_BB = [[-44.9, 165.4], [-38.0, 173.4], [-33.4, 171.0], [-33.4, 174.0], [-37.0, 179.6], 
             [-39.5, 179.6], [-48.1, 169.4], [-48.1, 165.4], [-44.9, 165.4]]
@@ -50,6 +55,13 @@ if __name__ == "__main__":
                 glats.append(lat)
                 glons.append(lon)
     inNZ, outNZ, boolNZ = calcdist.inNZ(glats, glons)
+   
+    ### JADEBUG
+    #import matplotlib.pyplot as plt
+    #plt.scatter([x[0] for x in outNZ], [x[1] for x in outNZ])
+    #plt.savefig('offshore.png')
+    #exit()
+    ### JADEBUG
 
     fin = open(calcconf['points']['points_file'], 'r')
     lats = []
@@ -63,14 +75,18 @@ if __name__ == "__main__":
     fin.close() 
 
     # Loop over epicenters
-    for loc in inNZ:
+    ### symmetric: all strikes and inNZ locations
+    ### asymmetric: restrict to relevant strikes and outNZ locations
+#    for loc in inNZ: # onshore
+    for loc in outNZ: # offshore
         epilat = loc[1]
         epilon = loc[0]
         evconf['evloc']['centroid_lat'] = epilat
         evconf['evloc']['centroid_lon'] = epilon
         logging.info('Epicenter: %.6f %.6f' % (epilat, epilon))
         # Loop over strikes
-        for strike in np.arange(0., 180., 15.):
+#        for strike in inStrikes:
+        for strike in outStrikes:
             evconf['evmech']['strike'] = strike
             gm = woq.computeGM(gmpeconf, evconf, calcconf)
             logging.info('Strike: %d' % strike)
@@ -85,7 +101,8 @@ if __name__ == "__main__":
                 fout = open(oname, 'w')
                 fout.write('#  %.4f  %.4f  %.2f  %03d\n' % (epilat, epilon, mag, strike))
                 for pga, lat, lon, stnn in zip(lmean_mgmpe, lats, lons, stnnames):
-                    fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
+#                    fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
+                    fout.write('%.5f %.5f %.5f\n' % (lat, lon, pga))
                 fout.close()
                 # write data to file
                 if calcconf['plots']:
