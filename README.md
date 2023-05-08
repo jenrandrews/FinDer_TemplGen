@@ -32,13 +32,14 @@ Currently available scaling relations:
  * Blaser2010
  * Skarlatoudis2016
 
+
 Other scaling relations used in ShakeMap/OQ have not been extended to have magnitude-length and magnitude-width relations. Note that rake information may be used to select the faulting style relation.
 
 ## GMPEs
 The setup of GMPEs uses the same concept of weighted sets as used in ShakeMap, but in gmpe.conf the user explicitly creates the set and weights (i.e. tectonic weighting is not altered with location/depth as the template set is not designed to be geographically positioned).
 
 ## Earthquake Depth
-Configure the 'hypo_depth' as the value to be used as centroid in the rupture plane. Once fault width exceeds this depth and/or the seismogenic depth the centroid depth may be altered within the script. In this case a note written to is written to log.
+Configure the 'hypo_depth' as the value to be used as centroid in the rupture plane. Once fault width exceeds this depth and/or the seismogenic depth, the centroid depth may be altered within the script, with a note written to log.
 
 ## Computing Ground Motion at Position/Distance
 There are two wrapper scripts available, one designed to create FinDer templates, the other designed to create ground motion scenario data.
