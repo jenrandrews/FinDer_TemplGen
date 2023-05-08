@@ -53,9 +53,11 @@ if __name__ == "__main__":
         fout = open('rupinfo.tbl', 'w')
         fout.write('Depth: {:.1f} Dip: {:.1f}\n'.format(evconf['evloc']['hypo_depth'], 
             evconf['evmech']['dip']))
+        fout2 = open('template_info.txt', 'w')
     for mag in gm:
         lmean_mgmpe, faultplane, xcorr = gm[mag]
         flen = faultplane.get_area()/faultplane.get_width()
+        oname = 'template_L%.6f_Azi0.txt' % flen
         if 'rupinfo' in calcconf and calcconf['rupinfo']:
             fout.write('{:.1f} {:.4f} {:.4f} {:.2f} {:.2f}\n'.format(
                 mag, 
@@ -63,9 +65,7 @@ if __name__ == "__main__":
                 faultplane.get_width(), 
                 min(faultplane.top_left.depth, faultplane.top_right.depth), 
                 max(faultplane.bottom_left.depth, faultplane.bottom_right.depth)))
-        #print(mag, pow(10., lmean_mgmpe))
-        continue
-        oname = 'template_L%.6f_Azi0.txt' % flen
+            fout2.write('{:.6f} {} {:.1f}\n'.format(flen, oname, mag))
         hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
         woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
         formatHeader(oname)
@@ -93,4 +93,5 @@ if __name__ == "__main__":
                 plt.close()
     if 'rupinfo' in calcconf and calcconf['rupinfo']:
         fout.close()
+        fout2.close()
 
