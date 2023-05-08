@@ -6,6 +6,12 @@ import wrapOQ as woq
 
 
 def formatHeader(oname):
+    '''
+    Format the FinDer template header by replacing default output with FinDer specific format.
+    Operation done on file.
+    Args:
+        oname: template file name
+    '''
     fin = open(oname, 'r')
     text = fin.read()
     text = text.replace('# ','')
@@ -19,31 +25,7 @@ def formatHeader(oname):
 
 if __name__ == "__main__":
     import logging.config
-    DEFLOG = {
-            'version': 1,
-            'disable_existing_loggers': False,
-            'handlers': {
-                'fileHandler': {
-                    'level': 'INFO',
-                    'formatter': 'fileFormatter',
-                    'class': 'logging.FileHandler',
-                    'mode': 'w',
-                },
-            },
-            'formatters': {
-                'fileFormatter': {
-                    'format': '%(asctime)s - %(levelname)s -  %(name)s - %(module)s - %(funcName)s - %(message)s',
-                    'datefmt': '%Y-%m-%d %H:%M:%S',
-                    'class': 'logging.Formatter'
-                },
-            },
-            'loggers': {
-                '': {
-                    'handlers': ['fileHandler'],
-                    'level': 'INFO',
-                },
-            }
-    }
+    from DEFLOG import DEFLOG
     DEFLOG['handlers']['fileHandler']['filename'] = \
             'makeFinDerTemplates_%s.log' % time.strftime('%y%m%dT%H%M%S', time.gmtime(time.time()))
     logging.config.dictConfig(DEFLOG)
@@ -66,10 +48,24 @@ if __name__ == "__main__":
 
     gm = woq.computeGM(gmpeconf, evconf, calcconf)
 
-    dkm = calcconf['griddkm']
+    dkm = calcconf['grid']['griddkm']
+    if 'rupinfo' in calcconf and calcconf['rupinfo']:
+        fout = open('rupinfo.tbl', 'w')
+        fout.write('Depth: {:.1f} Dip: {:.1f}\n'.format(evconf['evloc']['hypo_depth'], 
+            evconf['evmech']['dip']))
+        fout2 = open('template_info.txt', 'w')
     for mag in gm:
-        flen, lmean_mgmpe = gm[mag]
+        lmean_mgmpe, faultplane, xcorr = gm[mag]
+        flen = faultplane.get_area()/faultplane.get_width()
         oname = 'template_L%.6f_Azi0.txt' % flen
+        if 'rupinfo' in calcconf and calcconf['rupinfo']:
+            fout.write('{:.1f} {:.4f} {:.4f} {:.2f} {:.2f}\n'.format(
+                mag, 
+                flen, 
+                faultplane.get_width(), 
+                min(faultplane.top_left.depth, faultplane.top_right.depth), 
+                max(faultplane.bottom_left.depth, faultplane.bottom_right.depth)))
+            fout2.write('{:.6f} {} {:.1f}\n'.format(flen, oname, mag))
         hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
         woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
         formatHeader(oname)
@@ -81,10 +77,10 @@ if __name__ == "__main__":
             plt.savefig('templ_M%.1f.png' % mag)
             plt.close()
 
-        if calcconf['asym']:
+        if calcconf['grid']['asym']:
             oname = 'template_L%.6f_Azi0_asym.txt' % flen
             hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
-            masklonind = woq.floor(lmean_mgmpe.shape[1]/2)
+            masklonind = woq.floor(lmean_mgmpe.shape[1]/2) - round(xcorr/dkm)
             lmean_mgmpe[:,:masklonind] = -2.0
             woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
             formatHeader(oname)
@@ -95,4 +91,7 @@ if __name__ == "__main__":
                 plt.colorbar()
                 plt.savefig('templ_M%.1f_asym.png' % mag)
                 plt.close()
+    if 'rupinfo' in calcconf and calcconf['rupinfo']:
+        fout.close()
+        fout2.close()
 

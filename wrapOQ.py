@@ -17,7 +17,7 @@ from openquake.hazardlib import imt, const
 from openquake.hazardlib.gsim.base import RuptureContext
 from openquake.hazardlib.gsim.base import DistancesContext
 from openquake.hazardlib.gsim.base import SitesContext
-from openquake.hazardlib.geo import geodetic, Point, PlanarSurface, RectangularMesh
+from openquake.hazardlib.geo import geodetic, Point, PlanarSurface, Mesh, RectangularMesh
 
 # shakemap imports
 from shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
@@ -36,14 +36,26 @@ import Strasser2010_Intraslab_Ext
 logger = logging.getLogger(__name__)
 
 def lng2cm(inx):
+    '''
+    Convert PGA in ln(g) to log10(cm/s/s)
+    Args:
+        Numpy array of PGA values in ln(g)
+    Return:
+        Numpy array of PGA values in log10(cm/s/s)
+    '''
     inx = np.log10(np.exp(inx)) + log10(980.665)
     return inx
 
 
 def getScalingRelation(conf):
     '''
+    Returns the ScalingRelation class using configuration file input.
     Allowing for extension to other scaling relations. However, all will require an Ext class to 
     provide length and width rather than area.
+    Args:
+        conf: configuration dictionary
+    Return:
+        ScalingRelation class object
     '''
     if conf['scaling_relation']['scalrel'] == 'Leonard2014_Interplate':
         return Leonard2014_Interplate_Ext.Leonard2014_Interplate_Ext()
@@ -62,6 +74,15 @@ def getScalingRelation(conf):
 
 
 def importConfig(fname):
+    '''
+    Imports a configuration file into a python dictionary. 
+    Configuration file format expected (json) so that 'eval' works.
+    Lines beginning with # are ignored.
+    Args:
+        fname: filename
+    Return:
+        Dictionary with contents of configuration file
+    '''
     fin = open(fname, 'r')
     text = fin.read()
     ntext = ''
@@ -76,9 +97,23 @@ def importConfig(fname):
 
 
 def createRuptureContext(evconf, calcconf):
+    '''
+    Creates RuptureContext based on configuration file input for a simple, single planar surface
+    defined by centroid latitude and longitude, strike, dip and rake. Magnitude and scaling 
+    relation (from configuration file) are used to determine fault length and width. A seismogenic
+    depth (from configuration file) is used to limit width and can modify centroid depth for
+    large faults. To compute rupture plane corners from centroid, openquake geodetic functions
+    are used, but note that errors accumulate for large distances.
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+    Return:
+        rctx: RuptureContext for rupture
+        faultplane: PlanarSurface for rupture
+        xcorr: fault half width distance projected at surface
+    '''
     seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
     scalrel = getScalingRelation(calcconf)
-    strike = evconf['evmech']['strike']
     rctx = RuptureContext()
     rctx.rake = evconf['evmech']['rake']
     rctx.dip = evconf['evmech']['dip']
@@ -106,18 +141,29 @@ def createRuptureContext(evconf, calcconf):
         rctx.width = fwid
     # For FinDer, centroid must be kept at center of template
     # Use initial hypo depth as centroid depth unless width requires us to move it
-    # Hypo depth empirically found to be at about 60% depth, but simpler to treat
-    # as 50% here
-    if rctx.width > seismogenic_depth:
-        rctx.width = seismogenic_depth
+    # Hypo depth empirically found to be at about 60% depth, but simpler to treat as 50% here
+    if rctx.width > seismogenic_depth * sin(diprad):
+        rctx.width = seismogenic_depth * sin(diprad)
         rctx.ztor = 0.1
-        maxz = rctx.width
+        maxz = seismogenic_depth
+        centroid_depth = (maxz-rctx.ztor)/2.
+        logger.info('N.B. new centroid depth (too wide): %.2f' % (maxz/2.)) 
     elif centroid_depth < sin(diprad) * rctx.width * 0.5:
-        # Note centroid_depth is now altered!
         rctx.ztor = 0.1
         maxz = sin(diprad) * rctx.width
-        centroid_depth = maxz/2.
-        logger.info('N.B. new centroid depth: %.2f' % (maxz/2.)) 
+        if maxz > seismogenic_depth:
+            rctx.width = seismogenic_depth * sin(diprad)
+            maxz = seismogenic_depth
+        centroid_depth = (maxz-rctx.ztor)/2.
+        logger.info('N.B. new centroid depth (too shallow): %.2f' % (maxz/2.)) 
+    elif centroid_depth + (sin(diprad) * rctx.width * 0.5) > seismogenic_depth:
+        maxz = seismogenic_depth
+        rctx.ztor = maxz - (sin(diprad) * rctx.width)
+        if rctx.ztor < 0.1:
+            rctx.width = seismogenic_depth * sin(diprad)
+            rctx.ztor = 0.1
+        centroid_depth = (maxz-rctx.ztor)/2.
+        logger.info('N.B. new centroid depth (too deep): %.2f' % (maxz/2.)) 
     else:
         offset = (sin(diprad) * rctx.width * 0.5)
         rctx.ztor = centroid_depth - offset
@@ -126,17 +172,19 @@ def createRuptureContext(evconf, calcconf):
     # lat: -0.5 fault_len to +0.5 fault_len; 
     # lon: -0.5 projected width to +0.5 projected width
     # given centroid lat, lon
+    rctx.strike = evconf['evmech']['strike']
     e1_lon, e1_lat = geodetic.point_at(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 0., flen/2.) 
+            evconf['evloc']['centroid_lat'], evconf['evmech']['strike'], flen/2.) 
     e2_lon, e2_lat = geodetic.point_at(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 180., flen/2.) 
-    xcorr = (cos(diprad) * 0.5 * rctx.width)
-    tl_lon, tl_lat = geodetic.point_at(e2_lon, e2_lat, 270., xcorr) 
-    tr_lon, tr_lat = geodetic.point_at(e1_lon, e1_lat, 270., xcorr) 
-    bl_lon, bl_lat = geodetic.point_at(e2_lon, e2_lat, 90., xcorr) 
-    br_lon, br_lat = geodetic.point_at(e1_lon, e1_lat, 90., xcorr) 
-    faultplane = PlanarSurface(
-            0., rctx.dip, 
+            evconf['evloc']['centroid_lat'], evconf['evmech']['strike']+180., flen/2.) 
+    xcorr = cos(diprad) * 0.5 * rctx.width
+    tl_lon, tl_lat = geodetic.point_at(e2_lon, e2_lat, evconf['evmech']['strike']+270., xcorr) 
+    tr_lon, tr_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+270., xcorr) 
+    bl_lon, bl_lat = geodetic.point_at(e2_lon, e2_lat, evconf['evmech']['strike']+90., xcorr) 
+    br_lon, br_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+90., xcorr) 
+    logging.info('Fault corners: (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f)' % 
+            (tl_lon, tl_lat, tr_lon, tr_lat, bl_lon, bl_lat, br_lon, br_lat))
+    faultplane = PlanarSurface(strike=evconf['evmech']['strike'], dip=rctx.dip, 
             top_left=Point(depth=rctx.ztor, latitude=tl_lat, longitude=tl_lon),
             top_right=Point(depth=rctx.ztor, latitude=tr_lat, longitude=tr_lon),
             bottom_left=Point(depth=maxz, latitude=bl_lat, longitude=bl_lon),
@@ -144,7 +192,178 @@ def createRuptureContext(evconf, calcconf):
     return rctx, faultplane, xcorr
 
 
+def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+    '''
+    Create Distance and Sites Contexts for a list of points
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+        rctx: RuptureContext for fault
+        faultplane: PlanarSurface for fault
+        xcorr: fault half width distance projected at surface
+        bPlots: boolean to control plot generation
+    Return:
+        dctx: DistanceContext for the list of points
+        sctx: SitesContext for the list of points
+    '''
+    if not os.path.isfile(calcconf['points']['points_file']):
+        return None, None
+    # Expects a file with space separated fields: lat lon vs30 name
+    fin = open(calcconf['points']['points_file'], 'r')
+    lats = []
+    lons = []
+    lvs30 = []
+    for l in fin:
+        fs = l.split()
+        lons.append(float(fs[1]))
+        lats.append(float(fs[0]))
+        lvs30.append(float(fs[2]))
+    fin.close()
+    mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
+    dctx = DistancesContext()
+    dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
+    ### JADEBUG 
+#   # Noticed significant errors between computed rjb and distance between points for large fault
+#   # sizes (several 100s km) and certain azimuths when siting in NZ. Not sure how general these error
+#   # accumulations are, but avoiding these scenarios in testing for now!
+#    tmp = zip(dctx.rjb, mesh.lons, mesh.lats)
+#    for rjb,x,y in sorted(tmp):
+#        print(x,y,rjb, geodetic.distance(x, y, 0., faultplane.top_right.longitude, 
+#                faultplane.top_right.latitude, rctx.ztor))
+    ### JADEBUG
+    dctx.rjb_var = None
+    dctx.rrup_var = None
+    dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
+    rhyp = []
+    for x, y in zip(lons, lats):
+        rhyp.append(geodetic.distance(x, y, 0., evconf['evloc']['centroid_lon'], 
+                evconf['evloc']['centroid_lat'], rctx.hypo_depth))
+    dctx.rhypo = np.asarray(rhyp).reshape(len(lats))
+    dctx.rx = faultplane.get_rx_distance(mesh)
+    dctx.ry0 = faultplane.get_ry0_distance(mesh)
+    if rctx.dip == 90.:
+        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
+    else:
+        diprad = radians(rctx.dip)
+        # Very frustrating that we have to do this!
+        # Eq 14-20 Kaklamanos et al. (2011)
+        Acond = rctx.ztor * tan(diprad)
+        A = pow(rctx.ztor,2)
+        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
+        Ccond = Acond + (rctx.width / cos(diprad))
+        A = rctx.width * cos(diprad)
+        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
+        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
+        A = sin(diprad)
+        B = rctx.ztor * cos(diprad)
+        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
+        rrupp = Arrupp + Brrupp + Crrupp
+        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
+    if bPlots:
+        import matplotlib.pyplot as plt
+        flat = []
+        flon = []
+        for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, faultplane.bottom_left, faultplane.top_left]:
+            flat.append(x.latitude)
+            flon.append(x.longitude)
+        for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
+            cb = plt.scatter(lons, lats, c=[log10(x) if x>0 else 0 for x in v])
+            plt.scatter(evconf['evloc']['centroid_lon'], evconf['evloc']['centroid_lat'], marker='*', s=80)
+            plt.plot(flon, flat)
+            plt.colorbar(cb)
+            plt.savefig('%s_M%.1f_Azi%d.png' % (lbl, evconf['mag'], rctx.strike))
+            plt.close()
+    # --------------------------------------------------------------------------
+    # Site context
+    # --------------------------------------------------------------------------
+    sctx = SitesContext()
+    sctx.sids = np.arange(len(dctx.rjb))
+    sctx.vs30 = np.asarray(lvs30)
+    sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
+    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
+    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
+    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
+    sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
+    return dctx, sctx
+
+
+def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+    '''
+    Create Distance and Sites Contexts for a point at fixed Rjb alongside fault and with
+    fixed vs30. Other distance measures are computed.
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+        rctx: RuptureContext for fault
+        faultplane: PlanarSurface for fault
+        xcorr: fault half width projected at surface
+        bPlots: boolean to control plot generation
+    Return:
+        dctx: DistanceContext for the list of points
+        sctx: SitesContext for the list of points
+    '''
+    # --------------------------------------------------------------------------
+    # Distance context
+    # --------------------------------------------------------------------------
+    rjb = calcconf['pt']['rjb']
+    dctx = DistancesContext()
+    dctx.rjb = np.full((1, 1), rjb)
+    dctx.rjb_var = None
+    dctx.rrup_var = None
+    dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
+    dctx.rhypo = np.full((1, 1), np.sqrt(pow(rjb, 2) + pow(rctx.hypo_depth, 2)))
+    dctx.rx = dctx.rjb
+    dctx.ry0 = np.zeros_like(dctx.rjb)
+    # For long faults, the get_min_distance function appears to only use the corners to 
+    # compute horizontal distance, resulting in Rrup >> actual
+    # If future libs fix this issue, reinstate following line:
+    #dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
+    if rctx.dip == 90.:
+        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
+    else:
+        diprad = radians(rctx.dip)
+        # Very frustrating that we have to do this!
+        # Eq 14-20 Kaklamanos et al. (2011)
+        Acond = rctx.ztor * tan(diprad)
+        A = pow(rctx.ztor,2)
+        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
+        Ccond = Acond + (rctx.width / cos(diprad))
+        A = rctx.width * cos(diprad)
+        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
+        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
+        A = sin(diprad)
+        B = rctx.ztor * cos(diprad)
+        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
+        rrupp = Arrupp + Brrupp + Crrupp
+        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
+    # --------------------------------------------------------------------------
+    # Site context
+    # --------------------------------------------------------------------------
+    sctx = SitesContext()
+    sctx.sids = np.arange(1).reshape(1,1)
+    sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['pt']['vs30']
+    sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
+    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
+    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
+    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
+    sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
+    return dctx, sctx
+
+
 def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+    '''
+    Create Distance and Sites Contexts for a grid of points, fixed vs30
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+        rctx: RuptureContext for fault
+        faultplane: PlanarSurface for fault
+        xcorr: fault half width projected at surface
+        bPlots: boolean to control plot generation
+    Return:
+        dctx: DistanceContext for the list of points
+        sctx: SitesContext for the list of points
+    '''
     # ----
     # Empirical estimate for maximum distance needed in template grid
     # ----
@@ -156,11 +375,10 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         (evconf['mag'], maxdist, flen, fwid, rctx.width, rctx.ztor, maxz))
     xlim = xcorr + maxdist
     ylim = (flen/2.) + maxdist
-
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
-    dkm = calcconf['griddkm']
+    dkm = calcconf['grid']['griddkm']
     nx = ceil(xlim/dkm)
     xdist = nx*dkm
     lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
@@ -177,10 +395,8 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
             evconf['evloc']['centroid_lat'], 0., 0., ydist, 0., ny+1)
     inlats = np.concatenate([latsr[:-1], lats])
-    # Mask for asymmetric templates
     lons, lats = np.meshgrid(inlons, inlats)
     mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
-
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
     dctx.rjb_var = None
@@ -216,53 +432,48 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
         rrupp = Arrupp + Brrupp + Crrupp
         dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
-
     if bPlots:
         import matplotlib.pyplot as plt
-        plt.imshow(dctx.rrup)
-        plt.colorbar()
-        plt.savefig('rrup_M%.1f.png' % evconf['mag'])
-        plt.close()
-        plt.imshow(dctx.rjb)
-        plt.colorbar()
-        plt.savefig('rjb_M%.1f.png' % evconf['mag'])
-        plt.close()
-        plt.imshow(dctx.rx)
-        plt.colorbar()
-        plt.savefig('rx_M%.1f.png' % evconf['mag'])
-        plt.close()
-        plt.imshow(dctx.ry0)
-        plt.colorbar()
-        plt.savefig('ry0_M%.1f.png' % evconf['mag'])
-        plt.close()
-        plt.imshow(dctx.rhypo)
-        plt.colorbar()
-        plt.savefig('rhypo_M%.1f.png' % evconf['mag'])
-        plt.close()
-
+        for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
+            cb = plt.imshow(v)
+            plt.colorbar(cb)
+            plt.savefig('%s_M%.1f.png' % (lbl, evconf['mag']))
+            plt.close()
     # --------------------------------------------------------------------------
     # Site context
     # --------------------------------------------------------------------------
     sctx = SitesContext()
     sctx.sids = np.arange(len(inlons)*len(inlats)).reshape(dctx.rjb.shape)
     #sctx.sids = np.arange(len(dctx.rjb))
-    sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['vs30']
+    sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['grid']['vs30']
     sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
     sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
     sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
     sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
     sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
-
     return dctx, sctx
 
 
 def computeGM(gmpeconf, evconf, calcconf):
+    '''
+    Compute ground motion using openquake functionality. Use configuration files to define
+    the fault plane and earthquake parameters, points at which to calculate ground motion,
+    GMPEs and calculation settings. Ground motion computed is PGA in log10(cm/s/s) for
+    greater of two horizontals.
+    Args:
+        gmpeconf: GMPE configuration
+        evconf: event configuration
+        calcconf: calculation configuration
+    Return:
+        gm: dictionary with magnitude as key and values: median PGA in log10(cm/s/s), 
+        faultplane (PlanarSurface) object, fault half width distance projected at 
+        surface.
+    '''
     # --------------------------------------------------------------------------
     # Get multigmpe from config
     # --------------------------------------------------------------------------
     mgmpe = MultiGMPE.__from_config__(gmpeconf)
     IMT = imt.PGA() # will be in units of "g"
-
     # --------------------------------------------------------------------------
     # Set rupture basics
     # --------------------------------------------------------------------------
@@ -277,7 +488,12 @@ def computeGM(gmpeconf, evconf, calcconf):
         # --------------------------------------------------------------------------
         # Distance and Source contexts
         # --------------------------------------------------------------------------
-        dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
+        if 'grid' in calcconf and calcconf['grid']['compute']:
+            dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
+        if 'points' in calcconf and calcconf['points']['compute']:
+            dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
+        if 'pt' in calcconf and calcconf['pt']['compute']:
+            dctx, sctx = make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
         # --------------------------------------------------------------------------
         # Compute ground motion
         # --------------------------------------------------------------------------
@@ -297,8 +513,7 @@ def computeGM(gmpeconf, evconf, calcconf):
             lmean_mgmpe = bk17.convertAmpsOnce(IMT, lmean_mgmpe, dctx.rrup, rctx.mag)
         # Method get_mean_and_stddevs() of actual GMPE implementations is supposed to return the 
         # mean value as a natural logarithm of intensity.
-        gm[mag] = [faultplane.get_area()/faultplane.get_width(), lng2cm(lmean_mgmpe)]
-     
+        gm[mag] = [lng2cm(lmean_mgmpe), faultplane, xcorr]
     return gm
 
 

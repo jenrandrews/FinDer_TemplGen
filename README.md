@@ -31,6 +31,8 @@ Currently available scaling relations:
  * Strasser2010_Intraslab
  * Blaser2010
  * Skarlatoudis2016
+
+
 Other scaling relations used in ShakeMap/OQ have not been extended to have magnitude-length and magnitude-width relations. Note that rake information may be used to select the faulting style relation.
 
 ## GMPEs
@@ -42,6 +44,8 @@ Configure the 'hypo_depth' as the value to be used as centroid in the rupture pl
 ## Computing Ground Motion at Position/Distance
 There are two wrapper scripts available, one designed to create FinDer templates, the other designed to create ground motion scenario data.
 
-When using the FinDer template wrapper (makeFinDerTemplates.py), set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler. A fixed vs30 is used and is configured in the configuration file also.vThe script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True.
+When using the FinDer template wrapper (makeFinDerTemplates.py), set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler. A fixed vs30 is used and is configured in the configuration file also. The script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True. The rupture info files, as used by FinDer v3, can be created by setting the "rupinfo" configuration option to True.
 
 When using the scenario wrapper (makeScenarioStnData.py), set the configuration parameter ["points"]["compute"] to True and set the path for a points file. That file should contain lines with space delimited fields: lat lon vs30 name. The first three columns will be used as input to the ground motion computation. The name will be used when generating a FinDer data_ file.
+
+A third calculation option is for a single point (["pt"]["compute"] set to True) which simply computes the PGA for a single point at a specified Rjb (km) alongside the fault (i.e. Rx = Rjb and Ry0 = 0) and a specified vs30.
