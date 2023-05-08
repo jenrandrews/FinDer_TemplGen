@@ -289,7 +289,8 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
 
 def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     '''
-    Create Distance and Sites Contexts for a grid of points, fixed vs30
+    Create Distance and Sites Contexts for a point at fixed Rjb alongside fault and with
+    fixed vs30. Other distance measures are computed.
     Args:
         evconf: event configuration
         calcconf: calculation configuration
@@ -301,24 +302,16 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         dctx: DistanceContext for the list of points
         sctx: SitesContext for the list of points
     '''
-    # ----
-    # Empirical estimate for maximum distance needed in template grid
-    # ----
-    flen = faultplane.get_area()/faultplane.get_width()
-    fwid = faultplane.get_width()
-    maxz = faultplane.bottom_left.depth
-    maxdist = max([evconf['mag']*115. - 400., evconf['mag']*40 - 95])
-    logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f/%.4f ztor %.2f zmax %.2f' % \
-        (evconf['mag'], maxdist, flen, fwid, rctx.width, rctx.ztor, maxz))
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
+    rjb = calcconf['pt']['rjb']
     dctx = DistancesContext()
-    dctx.rjb = np.full((1, 1), 5.)
+    dctx.rjb = np.full((1, 1), rjb)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
-    dctx.rhypo = np.full((1, 1), np.sqrt(pow(5., 2) + pow(rctx.hypo_depth, 2)))
+    dctx.rhypo = np.full((1, 1), np.sqrt(pow(rjb, 2) + pow(rctx.hypo_depth, 2)))
     dctx.rx = dctx.rjb
     dctx.ry0 = np.zeros_like(dctx.rjb)
     # For long faults, the get_min_distance function appears to only use the corners to 
