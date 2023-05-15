@@ -222,6 +222,8 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
+    if dctx.rjb.shape[0] != mesh.shape[0]:
+        np.reshape(dctx.rjb, mesh.shape)
     ### JADEBUG 
 #   # Noticed significant errors between computed rjb and distance between points for large fault
 #   # sizes (several 100s km) and certain azimuths when siting in NZ. Not sure how general these error
@@ -399,6 +401,8 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
+    if dctx.rjb.shape[0] != mesh.shape[0]:
+        dctx.rjb = np.reshape(dctx.rjb, mesh.shape)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
@@ -409,7 +413,11 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
                 evconf['evloc']['centroid_lat'], rctx.hypo_depth))
     dctx.rhypo = np.asarray(rhyp).reshape(len(inlats), len(inlons))
     dctx.rx = faultplane.get_rx_distance(mesh)
+    if dctx.rx.shape[0] != mesh.shape[0]:
+        dctx.rx = np.reshape(dctx.rx, mesh.shape)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
+    if dctx.ry0.shape[0] != mesh.shape[0]:
+        dctx.ry0 = np.reshape(dctx.ry0, mesh.shape)
     # For long faults, the get_min_distance function appears to only use the corners to 
     # compute horizontal distance, resulting in Rrup >> actual
     # If future libs fix this issue, reinstate following line:
