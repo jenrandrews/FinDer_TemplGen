@@ -18,7 +18,7 @@ from openquake.hazardlib.gsim.base import RuptureContext
 from openquake.hazardlib.gsim.base import DistancesContext
 from openquake.hazardlib.gsim.base import SitesContext
 from openquake.hazardlib.geo import geodetic, Point, Line, Mesh, RectangularMesh
-from openquake.hazardlib.geo.surface import PlanarSurface, SimpleFaultSurface
+from openquake.hazardlib.geo.surface import PlanarSurface, SimpleFaultSurface, ComplexFaultSurface
 
 # shakemap imports
 from shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
@@ -120,10 +120,15 @@ def importRuptureContext(evconf):
     for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
         ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
     evconf['flist'] = ptlist
-    faultplane = SimpleFaultSurface.from_fault_data(fault_trace=Line(ptlist[:allpts//2]), 
-            upper_seismogenic_depth=ptlist[0].depth,
-            lower_seismogenic_depth=ptlist[-2].depth, 
-            dip=evconf['evmech']['dip'], 
+#    faultplane = SimpleFaultSurface.from_fault_data(fault_trace=Line(ptlist[:allpts//2]), 
+#            upper_seismogenic_depth=ptlist[0].depth,
+#            lower_seismogenic_depth=ptlist[-2].depth, 
+#            dip=evconf['evmech']['dip'], 
+#            mesh_spacing=1.0)
+    topedge = ptlist[:allpts//2]
+    bottomedge = ptlist[allpts//2:-1][::-1]
+    faultplane = ComplexFaultSurface.from_fault_data(edges=[Line(topedge), 
+            Line(bottomedge)],
             mesh_spacing=1.0)
     rctx = RuptureContext()
     rctx.strike = faultplane.get_strike()
@@ -132,9 +137,15 @@ def importRuptureContext(evconf):
     rctx.dip = evconf['evmech']['dip']
     rctx.mag = evconf['mag']
     rctx.hypo_depth = evconf['evloc']['hypo_depth']
-    rctx.width = geodetic.distance(ptlist[0].longitude, ptlist[0].latitude, ptlist[0].depth, 
-            ptlist[-2].longitude, ptlist[-2].latitude, ptlist[-2].depth)
+    rctx.width = faultplane.get_width()
+#    rctx.width = geodetic.distance(ptlist[0].longitude, ptlist[0].latitude, ptlist[0].depth, 
+#            ptlist[-2].longitude, ptlist[-2].latitude, ptlist[-2].depth)
     rctx.ztor = 0.1
+    if False:
+        import matplotlib.pyplot as plt
+        plt.plot([p.longitude for p in ptlist], [p.latitude for p in ptlist])
+        plt.scatter(faultplane.mesh.lons, faultplane.mesh.lats)
+        plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
     return evconf, rctx, faultplane, 0.
 
 def createRuptureContext(evconf, calcconf):
@@ -225,7 +236,7 @@ def createRuptureContext(evconf, calcconf):
     tr_lon, tr_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+270., xcorr) 
     bl_lon, bl_lat = geodetic.point_at(e2_lon, e2_lat, evconf['evmech']['strike']+90., xcorr) 
     br_lon, br_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+90., xcorr) 
-    logging.info('Fault corners: (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f)' % 
+    logger.info('Fault corners: (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f)' % 
             (tl_lon, tl_lat, tr_lon, tr_lat, bl_lon, bl_lat, br_lon, br_lat))
     faultplane = PlanarSurface(strike=evconf['evmech']['strike'], dip=rctx.dip, 
             top_left=Point(depth=rctx.ztor, latitude=tl_lat, longitude=tl_lon),
@@ -418,11 +429,12 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 0., ydist, 0., ny+1)
     inlats = np.concatenate([latsr[:-1], lats])
     lons, lats = np.meshgrid(inlons, inlats)
-    mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
+    nr = lons.shape[0]
+    nc = lons.shape[1]
+    #mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
+    mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
-    if dctx.rjb.shape[0] != mesh.shape[0]:
-        dctx.rjb = np.reshape(dctx.rjb, mesh.shape)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
@@ -430,18 +442,21 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     for y in inlats:
         for x in inlons:
             rhyp.append(geodetic.distance(x, y, 0., clon, clat, rctx.hypo_depth))
-    dctx.rhypo = np.asarray(rhyp).reshape(len(inlats), len(inlons))
+    dctx.rhypo = np.asarray(rhyp)
     dctx.rx = faultplane.get_rx_distance(mesh)
-    if dctx.rx.shape[0] != mesh.shape[0]:
-        dctx.rx = np.reshape(dctx.rx, mesh.shape)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
-    if dctx.ry0.shape[0] != mesh.shape[0]:
-        dctx.ry0 = np.reshape(dctx.ry0, mesh.shape)
-    dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
+    dctx.rrup = faultplane.get_min_distance(mesh)
+
+    dctx.rjb = np.reshape(dctx.rjb, (nr, nc))
+    dctx.rvolc = np.reshape(dctx.rvolc, (nr, nc))
+    dctx.rhypo = np.reshape(dctx.rhypo, (nr, nc))
+    dctx.rx = np.reshape(dctx.rx, (nr, nc))
+    dctx.ry0 = np.reshape(dctx.ry0, (nr, nc))
+    dctx.rrup = np.reshape(dctx.rrup, (nr, nc))
     if bPlots:
         import matplotlib.pyplot as plt
         for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
-            cb = plt.imshow(v)
+            cb = plt.imshow(v, origin='lower')
             plt.colorbar(cb)
             plt.savefig('%s_M%.1f.png' % (lbl, evconf['mag']))
             plt.close()
