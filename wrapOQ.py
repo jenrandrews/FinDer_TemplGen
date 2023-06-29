@@ -9,7 +9,7 @@ import copy
 import os
 import sys
 import logging
-from math import log10, sqrt, exp, floor, sin, cos, tan, radians, ceil
+from math import log10, sqrt, exp, floor, sin, cos, tan, radians, ceil, atan, degrees
 import numpy as np
 
 # openquake imports
@@ -119,7 +119,6 @@ def importRuptureContext(evconf):
     allpts = len(rup['features'][0]['geometry']['coordinates'][0][0])
     for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
         ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
-    evconf['flist'] = ptlist
 #    faultplane = SimpleFaultSurface.from_fault_data(fault_trace=Line(ptlist[:allpts//2]), 
 #            upper_seismogenic_depth=ptlist[0].depth,
 #            lower_seismogenic_depth=ptlist[-2].depth, 
@@ -127,8 +126,8 @@ def importRuptureContext(evconf):
 #            mesh_spacing=1.0)
     topedge = ptlist[:allpts//2]
     bottomedge = ptlist[allpts//2:-1][::-1]
-    faultplane = ComplexFaultSurface.from_fault_data(edges=[Line(topedge), 
-            Line(bottomedge)],
+    faultplane = ComplexFaultSurface.from_fault_data(
+            edges=[Line(topedge), Line(bottomedge)],
             mesh_spacing=1.0)
     rctx = RuptureContext()
     rctx.strike = faultplane.get_strike()
@@ -148,53 +147,39 @@ def importRuptureContext(evconf):
         plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
     return evconf, rctx, faultplane, 0.
 
-def createRuptureContext(evconf, calcconf):
+
+def getKaklamanosCentroidDepth(rctx):
     '''
-    Creates RuptureContext based on configuration file input for a simple, single planar surface
-    defined by centroid latitude and longitude, strike, dip and rake. Magnitude and scaling 
-    relation (from configuration file) are used to determine fault length and width. A seismogenic
-    depth (from configuration file) is used to limit width and can modify centroid depth for
-    large faults. To compute rupture plane corners from centroid, openquake geodetic functions
-    are used, but note that errors accumulate for large distances.
+    Centroid using Kaklamanos et al. (2010)
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
+    - rctx: rupture context
     Return:
-        rctx: RuptureContext for rupture
-        faultplane: PlanarSurface for rupture
-        xcorr: fault half width distance projected at surface
+    - centroid depth
     '''
-    seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
-    scalrel = getScalingRelation(calcconf)
-    rctx = RuptureContext()
-    rctx.rake = evconf['evmech']['rake']
-    rctx.dip = evconf['evmech']['dip']
-    rctx.mag = evconf['mag']
-    rctx.hypo_depth = evconf['evloc']['hypo_depth']
-    centroid_depth = evconf['evloc']['hypo_depth']
-    diprad = radians(rctx.dip)
-    # ----
-    # If no depth is given, use Kaklamanos el al. (2010) to set
-    # ----
-    if centroid_depth is None:
-        if rctx.rake is None:
-            centroid_depth = 7.08 + (0.61 * rctx.mag) # Kaklamanos eq.4 general
-        if (-45 <= rctx.rake <= 45) or (rctx.rake >= 135) or (rctx.rake <= -135):
-            centroid_depth = 5.63 + (0.68 * rctx.mag) # Kaklamanos eq.4 SS
-        else:
-            centroid_depth = 11.24 - (0.2 * rctx.mag) # Kaklamanos eq.4 non-SS
-    flen = scalrel.get_median_length(rctx.mag, rctx.rake)
-    fwid = scalrel.get_median_width(rctx.mag, rctx.rake)
-    # Note that mag range extends width relation beyond validity, so fix assumes
-    # len = wid when wid > len, i.e. aspect ratio 1.
-    if fwid > flen: 
-        rctx.width = flen
+    if rctx.rake is None:
+        return 7.08 + (0.61 * rctx.mag) # Kaklamanos eq.4 general
+    if (-45 <= rctx.rake <= 45) or (rctx.rake >= 135) or (rctx.rake <= -135):
+        return 5.63 + (0.68 * rctx.mag) # Kaklamanos eq.4 SS
     else:
-        rctx.width = fwid
-    farea = scalrel.get_median_area(rctx.mag, rctx.rake)
-    # For FinDer, centroid must be kept at center of template
-    # Use initial hypo depth as centroid depth unless width requires us to move it
-    # Hypo depth empirically found to be at about 60% depth, but simpler to treat as 50% here
+        return 11.24 - (0.2 * rctx.mag) # Kaklamanos eq.4 non-SS
+
+
+def adjustRCTXparams(rctx, seismogenic_depth, centroid_depth):
+    '''
+    Adjust the RCTX parameters so that depths are sensible
+    Use initial hypo depth as centroid depth unless width requires us to move it
+    Hypo depth empirically found to be at about 60% depth, but simpler to treat as 50% here
+    Args:
+    - rctx: the current rupture context
+    - seismogenic_depth: seismogenic_depth from configuration
+    - centroid_depth: centroid depth
+    Return:
+    - rctx: rupture context with modifications
+    - maxz: maximum depth
+    - offset: horizontal offset due to dip
+    - centroid_depth: updated centroid depth
+    '''
+    diprad = radians(rctx.dip)
     if rctx.width > seismogenic_depth * sin(diprad):
         rctx.width = seismogenic_depth * sin(diprad)
         rctx.ztor = 0.1
@@ -221,7 +206,136 @@ def createRuptureContext(evconf, calcconf):
         offset = (sin(diprad) * rctx.width * 0.5)
         rctx.ztor = centroid_depth - offset
         maxz = centroid_depth + offset
+    return rctx, maxz, centroid_depth
+
+
+def createSubFaultRuptureContexts(evconf, calcconf):
+    '''
+    Create fault-specific ruptures for magnitudes in range
+    Args:
+    - evconf: event config
+    - calcconf: calculation config
+    Return:
+    - list of lists, where each list has flist, RuptureContext, faultplane and xoffset
+    '''
+    import shapely as shp
+    import shapely.ops as ops
+    import pyproj
+    from json import JSONDecoder
+
+    # Set up the projections
+    wgs84 = pyproj.Proj(init='epsg:4326')
+    nz = pyproj.Proj(init='epsg:27200')
+    project = pyproj.Transformer.from_proj(wgs84, nz)
+    rev_project = pyproj.Transformer.from_proj(nz, wgs84)
+
+    # Read in the fault geojson
+    with open(evconf['evmech']['geometry'], 'r') as fin:
+        infault = JSONDecoder().decode(fin.read())
+    fault = shp.geometry.LineString([shp.Point(p[0], p[1]) for p in infault['coordinates']])
+    fault_cart = ops.transform(project.transform, fault)
+
+    # Set parameters that won't change
+    seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
+    scalrel = getScalingRelation(calcconf)
+    flen = scalrel.get_median_length(evconf['mag'], evconf['evmech']['rake'])
+    fwid = scalrel.get_median_width(evconf['mag'], evconf['evmech']['rake'])
+    # Note that mag range extends width relation beyond validity, so fix assumes
+    # len = wid when wid > len, i.e. aspect ratio 1.
+    if fwid > flen: 
+        fwid = flen
+    farea = scalrel.get_median_area(evconf['mag'], evconf['evmech']['rake'])
+    logger.info(f'Fault dimensions: {farea}, {flen}, {fwid}, {flen*fwid}, {flen/fwid}')
+    diprad = radians(evconf['evmech']['dip'])
+    xcorr = cos(diprad) * 0.5 * fwid
+
+    # Set the iteration for multiple overlapping fault patches
+    # Overlap is 10% or 10 km
+    overlap = min([10.*1000., flen*1000.*0.1])
+    n_subfaults = round(((fault_cart.length)-flen)/overlap)
+    dist_step = fault_cart.length / n_subfaults
+    rctxs = faultplanes = xcorrs = []
+    for sind in range(n_subfaults):
+        # Create rupture context
+        rctx = RuptureContext()
+        rctx.rake = evconf['evmech']['rake']
+        rctx.dip = evconf['evmech']['dip']
+        rctx.mag = evconf['mag']
+        rctx.hypo_depth = evconf['evloc']['hypo_depth']
+        rctx.width = fwid
+        centroid_depth = evconf['evloc']['hypo_depth']
+        if centroid_depth is None:
+            centroid_depth = getKaklamanosCentroidDepth(rctx)
+        rctx, maxz, centroid_depth = adjustRCTXparams(rctx, seismogenic_depth, centroid_depth)
+
+        # Step through and create sub fault
+        start_dist = sind * dist_step 
+        end_dist = start_dist + (flen * 1000.)
+        sbf = ops.substring(fault_cart, start_dist, end_dist)
+        dx = sbf.coords[-1][0] - sbf.coords[0][0]
+        dy = sbf.coords[-1][1] - sbf.coords[0][1]
+        theta = degrees(atan(dx/dy))
+        if sbf.coords[0][1] > sbf.coords[-1][1]:
+            approx_strike = 180. + theta
+        elif sbf.coords[0][0] > sbf.coords[-1][0]:
+            approx_strike = 360. + theta
+        else:
+            approx_strike = theta
+        if abs(approx_strike - evconf['evmech']['strike']) < 90.:
+            xcorr *= -1.
+        b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
+        sb_geo = ops.transform(rev_project.transform, sbf)
+        b_sb_geo = ops.transform(rev_project.transform, b_sbf)
+        topedge = [Point(depth=rctx.ztor, latitude=pt[1], longitude=pt[0]) for pt in sb_geo.coords]
+        bottomedge = [Point(depth=maxz, latitude=pt[1], longitude=pt[0]) for pt in b_sb_geo.coords]
+        faultplane = ComplexFaultSurface.from_fault_data(
+            edges=[Line(topedge), Line(bottomedge)],
+            mesh_spacing=1.0)
+        faultplanes.append(faultplane)
+        xcorrs.append(xcorr)
+        rctxs.append(rctx)
+    return rctxs, faultplanes, xcorrs
+
+
+def createRuptureContext(evconf, calcconf):
+    '''
+    Creates RuptureContext based on configuration file input for a simple, single planar surface
+    defined by centroid latitude and longitude, strike, dip and rake. Magnitude and scaling 
+    relation (from configuration file) are used to determine fault length and width. A seismogenic
+    depth (from configuration file) is used to limit width and can modify centroid depth for
+    large faults. To compute rupture plane corners from centroid, openquake geodetic functions
+    are used, but note that errors accumulate for large distances.
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+    Return:
+        rctx: RuptureContext for rupture
+        faultplane: PlanarSurface for rupture
+        xcorr: fault half width distance projected at surface
+    '''
+    seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
+    scalrel = getScalingRelation(calcconf)
+    rctx = RuptureContext()
+    rctx.rake = evconf['evmech']['rake']
+    rctx.dip = evconf['evmech']['dip']
+    rctx.mag = evconf['mag']
+    rctx.hypo_depth = evconf['evloc']['hypo_depth']
+    centroid_depth = evconf['evloc']['hypo_depth']
+    diprad = radians(rctx.dip)
+    if centroid_depth is None:
+        centroid_depth = getKaklamanosCentroidDepth(rctx)
+    flen = scalrel.get_median_length(rctx.mag, rctx.rake)
+    fwid = scalrel.get_median_width(rctx.mag, rctx.rake)
+    # Note that mag range extends width relation beyond validity, so fix assumes
+    # len = wid when wid > len, i.e. aspect ratio 1.
+    if fwid > flen: 
+        rctx.width = flen
+    else:
+        rctx.width = fwid
+    farea = scalrel.get_median_area(rctx.mag, rctx.rake)
+    rctx, maxz, centroid_depth = adjustRCTXparams(rctx, seismogenic_depth, centroid_depth)
     logger.info(f'Fault dimensions: {farea}, {flen}, {rctx.width}, {flen*rctx.width}, {flen/rctx.width}')
+
     # Fault plane defined as 
     # lat: -0.5 fault_len to +0.5 fault_len; 
     # lon: -0.5 projected width to +0.5 projected width
@@ -499,14 +613,23 @@ def computeGM(gmpeconf, evconf, calcconf):
     # Set rupture basics
     # --------------------------------------------------------------------------
     gm = {}
+    if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
+            and evconf['evmech']['geometry'].split('.')[-1] == 'json':
+        logger.info('Computing for fault geometry, so ensure no magnitude loop')
+        calcconf['magrange']['magmax'] = calcconf['magrange']['magmin']
     for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
             calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep']):
         # --------------------------------------------------------------------------
         # Rupture context
         # --------------------------------------------------------------------------
         if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
-            evconf, rctx, faultplane, xcorr = importRuptureContext(evconf)
-            mag = evconf['mag']
+            if evconf['evmech']['geometry'].split('.')[-1] == 'json':
+                evconf, rctx, faultplane, xcorr = importRuptureContext(evconf)
+                mag = evconf['mag']
+            elif evconf['evmech']['geometry'].split('.')[-1] == 'geojson': 
+                evconf['mag'] = mag
+                rctx, faultplane, xcorr = createSubFaultRuptureContexts(evconf, calcconf)        
+                exit()
         else:
             evconf['mag'] = mag
             rctx, faultplane, xcorr = createRuptureContext(evconf, calcconf)
@@ -539,8 +662,6 @@ def computeGM(gmpeconf, evconf, calcconf):
         # Method get_mean_and_stddevs() of actual GMPE implementations is supposed to return the 
         # mean value as a natural logarithm of intensity.
         gm[mag] = [lng2cm(lmean_mgmpe), faultplane, xcorr]
-        if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
-            break
     return gm, evconf
 
 
