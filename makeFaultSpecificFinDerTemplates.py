@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
             if calcconf['plots']:
                 import matplotlib.pyplot as plt
-                plt.imshow(lmean_mgmpe)
+                plt.imshow(lmean_mgmpe, origin='lower')
                 plt.colorbar()
                 plt.savefig(f'templ_M{mag:.1f}.png')
                 plt.close()

@@ -239,7 +239,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     scalrel = getScalingRelation(calcconf)
     flen = scalrel.get_median_length(evconf['mag'], evconf['evmech']['rake'])
     fwid = scalrel.get_median_width(evconf['mag'], evconf['evmech']['rake'])
-    if flen > fault_cart.length:
+    if flen > fault_cart.length / 1000.:
         logger.error(f'Fault is too small {fault_cart.length:.4f} for a M{evconf["mag"]:.1f} event {flen:.4f}')
         return None, None
     # Note that mag range extends width relation beyond validity, so fix assumes
@@ -253,12 +253,14 @@ def createSubFaultRuptureContexts(evconf, calcconf):
 
     # Set the iteration for multiple overlapping fault patches
     # Overlap is 10% or 20 km
+    dist_step = 0
     overlap = min([20.*1000., flen*1000.*0.1])
-    n_subfaults = round(((fault_cart.length)-flen)/overlap)
-    dist_step = fault_cart.length / n_subfaults
+    n_subfaults = round(((fault_cart.length)-(flen*1000.))/overlap)
+    if n_subfaults > 0:
+        dist_step = ((fault_cart.length)-(flen*1000.)) / n_subfaults
     l_rctx = []
     l_faultplane = []
-    for sind in range(n_subfaults):
+    for sind in range(n_subfaults + 1):
         # Create rupture context
         rctx = RuptureContext()
         rctx.rake = evconf['evmech']['rake']
