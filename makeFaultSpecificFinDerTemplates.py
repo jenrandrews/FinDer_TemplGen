@@ -56,18 +56,11 @@ if __name__ == "__main__":
         fout2 = open('template_info.txt', 'w')
     for mag in gm:
         for centroid_lat, centroid_lon in gm[mag]:
-            lmean_mgmpe, faultplane, xcorr = gm[mag]
-            flen = faultplane.get_area()/faultplane.get_width()
-            oname = 'template_L%.6f_Azi0.txt' % flen
-            if 'rupinfo' in calcconf and calcconf['rupinfo']:
-                fout.write('{:.1f} {:.4f} {:.4f} {:.2f} {:.2f}\n'.format(
-                    mag, 
-                    flen, 
-                    faultplane.get_width(), 
-                    min(faultplane.top_left.depth, faultplane.top_right.depth), 
-                    max(faultplane.bottom_left.depth, faultplane.bottom_right.depth)))
-                fout2.write('{:.6f} {} {:.1f}\n'.format(flen, oname, mag))
-            hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
+            lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
+            fwid = faultplane.get_width()
+            flen = faultplane.get_area()/fwid
+            oname = f'template_L{flen:.6f}_Azi0_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
+            hstr = '{:d} {:d}\n{:f} {:d} {:.1f}\n'.format(lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
             woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
             formatHeader(oname)
 
@@ -75,23 +68,31 @@ if __name__ == "__main__":
                 import matplotlib.pyplot as plt
                 plt.imshow(lmean_mgmpe)
                 plt.colorbar()
-                plt.savefig('templ_M%.1f.png' % mag)
+                plt.savefig(f'templ_M{mag:.1f}.png')
                 plt.close()
 
-            if calcconf['grid']['asym']:
-                oname = 'template_L%.6f_Azi0_asym.txt' % flen
-                hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
-                masklonind = woq.floor(lmean_mgmpe.shape[1]/2) - round(xcorr/dkm)
-                lmean_mgmpe[:,:masklonind] = -2.0
-                woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
-                formatHeader(oname)
+            ## Write out rupture_* files
+            onamer = f'rupture_L{flen:.6f}_Azi0_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
+            top = faultplane.surface_nodes[0].nodes[0].nodes[0].nodes[0]
+            bottom = faultplane.surface_nodes[0].nodes[-1].nodes[0].nodes[0]
+            with open(onamer, 'w') as foutr:
+                for i in range(len(top.text)//3):
+                    foutr.write(f'{top.text[i*3+1]} {top.text[i*3]} {top.text[i*3+2]}\n')
+                for i in range(len(bottom.text)//3-1, -1, -1):
+                    foutr.write(f'{bottom.text[i*3+1]} {bottom.text[i*3]} {bottom.text[i*3+2]}\n')
+                foutr.write(f'{top.text[1]} {top.text[0]} {top.text[2]}\n')
 
-                if calcconf['plots']:
-                    import matplotlib.pyplot as plt
-                    plt.imshow(lmean_mgmpe)
-                    plt.colorbar()
-                    plt.savefig('templ_M%.1f_asym.png' % mag)
-                    plt.close()
+            if 'rupinfo' in calcconf and calcconf['rupinfo']:
+                fout.write('{:.1f} {:.4f} {:.4f} {:.2f} {:.2f}\n'.format(
+                    mag, 
+                    flen, 
+                    faultplane.get_width(), 
+                    min([top.text[i*3+2] for i in range(len(top.text)//3)]),
+                    min([bottom.text[i*3+2] for i in range(len(bottom.text)//3)])))
+                fout2.write('{:.6f} {:.6f} {:.6f} {:.6f} {:.1f} {} {}\n'.format(
+                    flen, fwid, centroid_lat, centroid_lon, mag, oname, onamer
+                    ))
+
     if 'rupinfo' in calcconf and calcconf['rupinfo']:
         fout.close()
         fout2.close()

@@ -104,7 +104,6 @@ def importRuptureContext(evconf):
     Return:
         rctx: RuptureContext for rupture
         faultplane: PlanarSurface for rupture
-        xcorr: fault half width distance projected at surface
     '''
     from json import JSONDecoder
     with open(evconf['evmech']['geometry'], 'r') as fin:
@@ -145,7 +144,7 @@ def importRuptureContext(evconf):
         plt.plot([p.longitude for p in ptlist], [p.latitude for p in ptlist])
         plt.scatter(faultplane.mesh.lons, faultplane.mesh.lats)
         plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
-    return evconf, rctx, faultplane, 0.
+    return evconf, [rctx], [faultplane]
 
 
 def getKaklamanosCentroidDepth(rctx):
@@ -240,6 +239,9 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     scalrel = getScalingRelation(calcconf)
     flen = scalrel.get_median_length(evconf['mag'], evconf['evmech']['rake'])
     fwid = scalrel.get_median_width(evconf['mag'], evconf['evmech']['rake'])
+    if flen > fault_cart.length:
+        logger.error(f'Fault is too small {fault_cart.length:.4f} for a M{evconf["mag"]:.1f} event {flen:.4f}')
+        return None, None
     # Note that mag range extends width relation beyond validity, so fix assumes
     # len = wid when wid > len, i.e. aspect ratio 1.
     if fwid > flen: 
@@ -250,11 +252,12 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     xcorr = cos(diprad) * 0.5 * fwid
 
     # Set the iteration for multiple overlapping fault patches
-    # Overlap is 10% or 10 km
-    overlap = min([10.*1000., flen*1000.*0.1])
+    # Overlap is 10% or 20 km
+    overlap = min([20.*1000., flen*1000.*0.1])
     n_subfaults = round(((fault_cart.length)-flen)/overlap)
     dist_step = fault_cart.length / n_subfaults
-    rctxs = faultplanes = xcorrs = []
+    l_rctx = []
+    l_faultplane = []
     for sind in range(n_subfaults):
         # Create rupture context
         rctx = RuptureContext()
@@ -281,7 +284,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             approx_strike = 360. + theta
         else:
             approx_strike = theta
-        if abs(approx_strike - evconf['evmech']['strike']) < 90.:
+        if abs(approx_strike - evconf['evmech']['strike']) < 90. and xcorr > 0.:
             xcorr *= -1.
         b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
         sb_geo = ops.transform(rev_project.transform, sbf)
@@ -291,10 +294,9 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         faultplane = ComplexFaultSurface.from_fault_data(
             edges=[Line(topedge), Line(bottomedge)],
             mesh_spacing=1.0)
-        faultplanes.append(faultplane)
-        xcorrs.append(xcorr)
-        rctxs.append(rctx)
-    return rctxs, faultplanes, xcorrs
+        l_faultplane.append(faultplane)
+        l_rctx.append(rctx)
+    return l_rctx, l_faultplane
 
 
 def createRuptureContext(evconf, calcconf):
@@ -311,7 +313,6 @@ def createRuptureContext(evconf, calcconf):
     Return:
         rctx: RuptureContext for rupture
         faultplane: PlanarSurface for rupture
-        xcorr: fault half width distance projected at surface
     '''
     seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
     scalrel = getScalingRelation(calcconf)
@@ -361,10 +362,10 @@ def createRuptureContext(evconf, calcconf):
     #    evconf['evmech']['strike'], rctx.dip, rctx.rake, ztor=None)
     logger.info(f'faultplane: {faultplane.get_surface_boundaries()}') 
     #logger.info(f'fptest: {fptest.get_surface_boundaries()}') 
-    return rctx, faultplane, xcorr
+    return [rctx], [faultplane]
 
 
-def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a list of points
     Args:
@@ -372,7 +373,6 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         calcconf: calculation configuration
         rctx: RuptureContext for fault
         faultplane: PlanarSurface for fault
-        xcorr: fault half width distance projected at surface
         bPlots: boolean to control plot generation
     Return:
         dctx: DistanceContext for the list of points
@@ -449,7 +449,7 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     return dctx, sctx
 
 
-def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a point at fixed Rjb alongside fault and with
     fixed vs30. Other distance measures are computed.
@@ -458,7 +458,6 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         calcconf: calculation configuration
         rctx: RuptureContext for fault
         faultplane: PlanarSurface for fault
-        xcorr: fault half width projected at surface
         bPlots: boolean to control plot generation
     Return:
         dctx: DistanceContext for the list of points
@@ -491,7 +490,7 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     return dctx, sctx
 
 
-def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
+def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a grid of points, fixed vs30
     Args:
@@ -499,7 +498,6 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
         calcconf: calculation configuration
         rctx: RuptureContext for fault
         faultplane: PlanarSurface for fault
-        xcorr: fault half width projected at surface
         bPlots: boolean to control plot generation
     Return:
         dctx: DistanceContext for the list of points
@@ -509,23 +507,15 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     # Empirical estimate for maximum distance needed in template grid
     # ----
     maxdist = max([evconf['mag']*115. - 400., evconf['mag']*40 - 95])
-    if isinstance(faultplane, PlanarSurface):
-        flen = faultplane.get_area()/faultplane.get_width()
-        fwid = faultplane.get_width()
-        xlim = xcorr + maxdist
-        ylim = (flen/2.) + maxdist
-        clat = evconf['evloc']['centroid_lat']
-        clon = evconf['evloc']['centroid_lon']
-        logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f/%.4f ztor %.2f' % \
-            (evconf['mag'], maxdist, flen, fwid, rctx.width, rctx.ztor))
-    else:
-        bb = faultplane.get_bounding_box()
-        clon = bb.west + ((bb.east - bb.west) / 2.)
-        clat = bb.south + ((bb.north - bb.south) / 2.)
-        xlim = geodetic.distance(clon, clat, 0., bb.east, clat, 0.) + maxdist
-        ylim = geodetic.distance(clon, clat, 0., clon, bb.north, 0.) + maxdist
-        logger.info(r'Mag %.1f  Max dist %.4f xlim %.4f ylim %.4f ztor %.2f' % \
-            (evconf['mag'], maxdist, xlim, ylim, rctx.ztor))
+    flen = faultplane.get_area()/faultplane.get_width()
+    fwid = faultplane.get_width()
+    bb = faultplane.get_bounding_box()
+    clon = bb.west + ((bb.east - bb.west) / 2.)
+    clat = bb.south + ((bb.north - bb.south) / 2.)
+    xlim = geodetic.distance(clon, clat, 0., bb.east, clat, 0.) + maxdist
+    ylim = geodetic.distance(clon, clat, 0., clon, bb.north, 0.) + maxdist
+    logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f xlim %.4f ylim %.4f ztor %.2f' % \
+        (evconf['mag'], maxdist, flen, fwid, xlim, ylim, rctx.ztor))
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
@@ -624,44 +614,49 @@ def computeGM(gmpeconf, evconf, calcconf):
         # --------------------------------------------------------------------------
         if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
             if evconf['evmech']['geometry'].split('.')[-1] == 'json':
-                evconf, rctx, faultplane, xcorr = importRuptureContext(evconf)
+                evconf, l_rctx, l_faultplane = importRuptureContext(evconf)
                 mag = evconf['mag']
             elif evconf['evmech']['geometry'].split('.')[-1] == 'geojson': 
                 evconf['mag'] = mag
-                rctx, faultplane, xcorr = createSubFaultRuptureContexts(evconf, calcconf)        
-                exit()
+                l_rctx, l_faultplane = createSubFaultRuptureContexts(evconf, calcconf)        
+                if l_rctx is None:
+                    return None, evconf
         else:
             evconf['mag'] = mag
-            rctx, faultplane, xcorr = createRuptureContext(evconf, calcconf)
-        # --------------------------------------------------------------------------
-        # Distance and Source contexts
-        # --------------------------------------------------------------------------
-        if 'grid' in calcconf and calcconf['grid']['compute']:
-            dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
-        if 'points' in calcconf and calcconf['points']['compute']:
-            dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
-        if 'pt' in calcconf and calcconf['pt']['compute']:
-            dctx, sctx = make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = calcconf['plots'])
-        # --------------------------------------------------------------------------
-        # Compute ground motion
-        # --------------------------------------------------------------------------
-        lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
-        # US ShakeAlert measures largest of two horizontals (FFD2)
-        # Seiscomp measures peak of real-time root or sum or squares of two horizontals
-        # Most GMPEs use geometric mean measures (GM, GMRotD50 etc.) which are smaller
-        # than either of the two above measures. Note that no conversion to the latter 
-        # exists, but to the former is available with either class (Beyer & Bommer or
-        # Boore & Kishida). Since the former is smaller than the latter, converting to
-        # the former gets us closer...
-        if mgmpe.DEFINED_FOR_INTENSITY_MEASURE_COMPONENT != const.IMC.GREATER_OF_TWO_HORIZONTAL:
-            logger.info('Converting component')
-            bk17 = BooreKishida2017(
-                mgmpe.DEFINED_FOR_INTENSITY_MEASURE_COMPONENT, const.IMC.GREATER_OF_TWO_HORIZONTAL
-            )
-            lmean_mgmpe = bk17.convertAmpsOnce(IMT, lmean_mgmpe, dctx.rrup, rctx.mag)
-        # Method get_mean_and_stddevs() of actual GMPE implementations is supposed to return the 
-        # mean value as a natural logarithm of intensity.
-        gm[mag] = [lng2cm(lmean_mgmpe), faultplane, xcorr]
+            l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
+        for rctx, faultplane in zip(l_rctx, l_faultplane): 
+            centroid = faultplane.get_middle_point()
+            # --------------------------------------------------------------------------
+            # Distance and Source contexts
+            # --------------------------------------------------------------------------
+            if 'grid' in calcconf and calcconf['grid']['compute']:
+                dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+            if 'points' in calcconf and calcconf['points']['compute']:
+                dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+            if 'pt' in calcconf and calcconf['pt']['compute']:
+                dctx, sctx = make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+            # --------------------------------------------------------------------------
+            # Compute ground motion
+            # --------------------------------------------------------------------------
+            lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
+            # US ShakeAlert measures largest of two horizontals (FFD2)
+            # Seiscomp measures peak of real-time root or sum or squares of two horizontals
+            # Most GMPEs use geometric mean measures (GM, GMRotD50 etc.) which are smaller
+            # than either of the two above measures. Note that no conversion to the latter 
+            # exists, but to the former is available with either class (Beyer & Bommer or
+            # Boore & Kishida). Since the former is smaller than the latter, converting to
+            # the former gets us closer...
+            if mgmpe.DEFINED_FOR_INTENSITY_MEASURE_COMPONENT != const.IMC.GREATER_OF_TWO_HORIZONTAL:
+                logger.info('Converting component')
+                bk17 = BooreKishida2017(
+                    mgmpe.DEFINED_FOR_INTENSITY_MEASURE_COMPONENT, const.IMC.GREATER_OF_TWO_HORIZONTAL
+                )
+                lmean_mgmpe = bk17.convertAmpsOnce(IMT, lmean_mgmpe, dctx.rrup, rctx.mag)
+            # Method get_mean_and_stddevs() of actual GMPE implementations is supposed to return the 
+            # mean value as a natural logarithm of intensity.
+            if mag not in gm:
+                gm[mag] = {}
+            gm[mag][(centroid.latitude, centroid.longitude)] = [lng2cm(lmean_mgmpe), faultplane]
     return gm, evconf
 
 
