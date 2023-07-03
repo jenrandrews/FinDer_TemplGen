@@ -231,7 +231,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     # Read in the fault geojson
     with open(evconf['evmech']['geometry'], 'r') as fin:
         infault = JSONDecoder().decode(fin.read())
-    fault = shp.geometry.LineString([shp.Point(p[0], p[1]) for p in infault['coordinates']])
+    fault = shp.geometry.LineString([(p[0], p[1]) for p in infault['coordinates']])
     fault_cart = ops.transform(project.transform, fault)
 
     # Set parameters that won't change
