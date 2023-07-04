@@ -286,9 +286,15 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             approx_strike = 360. + theta
         else:
             approx_strike = theta
+        side = 'left'
         if abs(approx_strike - evconf['evmech']['strike']) < 90. and xcorr > 0.:
             xcorr *= -1.
-        b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
+            side = 'right'
+        if int(shp.__version__.split('.')[0]) >= 2:
+            b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
+        else:
+            b_sbf = sbf.parallel_offset(abs(xcorr * 1000), side, join_style=2)
+        exit()
         sb_geo = ops.transform(rev_project.transform, sbf)
         b_sb_geo = ops.transform(rev_project.transform, b_sbf)
         topedge = [Point(depth=rctx.ztor, latitude=pt[1], longitude=pt[0]) for pt in sb_geo.coords]
