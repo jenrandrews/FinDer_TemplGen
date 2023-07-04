@@ -294,7 +294,6 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
         else:
             b_sbf = sbf.parallel_offset(abs(xcorr * 1000), side, join_style=2)
-        exit()
         sb_geo = ops.transform(rev_project.transform, sbf)
         b_sb_geo = ops.transform(rev_project.transform, b_sbf)
         topedge = [Point(depth=rctx.ztor, latitude=pt[1], longitude=pt[0]) for pt in sb_geo.coords]

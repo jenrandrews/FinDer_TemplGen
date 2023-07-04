@@ -48,6 +48,11 @@ if __name__ == "__main__":
 
     gm, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
 
+#    for mag in gm:
+#        for centroid_lat, centroid_lon in gm[mag]:
+#            print(f'{mag:.1f}, {centroid_lat:.6f}, {centroid_lon:.6f}')
+#    exit()
+
     dkm = calcconf['grid']['griddkm']
     if 'rupinfo' in calcconf and calcconf['rupinfo']:
         fout = open('rupinfo.tbl', 'w')
@@ -59,7 +64,7 @@ if __name__ == "__main__":
             lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
             fwid = faultplane.get_width()
             flen = faultplane.get_area()/fwid
-            oname = f'template_L{flen:.6f}_Azi0_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
+            oname = f'template_L{flen:.6f}_W{fwid:.4f}_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
             hstr = '{:d} {:d}\n{:f} {:d} {:.1f}\n'.format(lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
             woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
             formatHeader(oname)
@@ -68,11 +73,11 @@ if __name__ == "__main__":
                 import matplotlib.pyplot as plt
                 plt.imshow(lmean_mgmpe, origin='lower')
                 plt.colorbar()
-                plt.savefig(f'templ_M{mag:.1f}.png')
+                plt.savefig(f'templ_M{mag:.1f}_{centroid_lat:.4f}_{centroid_lon:.4f}.png')
                 plt.close()
 
             ## Write out rupture_* files
-            onamer = f'rupture_L{flen:.6f}_Azi0_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
+            onamer = f'rupture_L{flen:.6f}_W{fwid:.4f}_{centroid_lat:.4f}_{centroid_lon:.4f}.txt'
             top = faultplane.surface_nodes[0].nodes[0].nodes[0].nodes[0]
             bottom = faultplane.surface_nodes[0].nodes[-1].nodes[0].nodes[0]
             with open(onamer, 'w') as foutr:
