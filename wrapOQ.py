@@ -497,18 +497,43 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     return dctx, sctx
 
 
-def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
+def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     '''
-    Create Distance and Sites Contexts for a grid of points, fixed vs30
+    Make a mesh for use as distance context based on extent
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
-        rctx: RuptureContext for fault
-        faultplane: PlanarSurface for fault
-        bPlots: boolean to control plot generation
+    - calcconf
+    - minlat
+    - maxlat
+    - minlon
+    - maxlon
     Return:
-        dctx: DistanceContext for the list of points
-        sctx: SitesContext for the list of points
+    - mesh
+    '''
+    xlim = geodetic.distance(minlon, maxlat, 0., maxlon, maxlat, 0.)
+    ylim = geodetic.distance(minlon, minlat, 0., minlon, maxlat, 0.)
+    dkm = calcconf['grid']['griddkm']
+    nx = ceil(xlim/dkm)
+    xdist = nx*dkm
+    inlons, lats, depths = geodetic.npoints_towards(maxlon, minlat, 0., 90., xdist, 0., nx+1)
+    ny = ceil(ylim/dkm)
+    ydist = ny*dkm
+    lons, inlats, depths = geodetic.npoints_towards(minlon, minlat, 0., 0., ydist, 0., ny+1)
+    lons, lats = np.meshgrid(inlons, inlats)
+    nr = lons.shape[0]
+    nc = lons.shape[1]
+    mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
+    return mesh
+
+
+def make_mesh(evconf, calcconf, faultplane):
+    '''
+    Make a mesh for use as distance context
+    Args:
+    - evconf
+    - calcconf
+    - faultplane
+    Return:
+    - mesh
     '''
     # ----
     # Empirical estimate for maximum distance needed in template grid
@@ -522,10 +547,7 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     xlim = geodetic.distance(clon, clat, 0., bb.east, clat, 0.) + maxdist
     ylim = geodetic.distance(clon, clat, 0., clon, bb.north, 0.) + maxdist
     logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f xlim %.4f ylim %.4f ztor %.2f' % \
-        (evconf['mag'], maxdist, flen, fwid, xlim, ylim, rctx.ztor))
-    # --------------------------------------------------------------------------
-    # Distance context
-    # --------------------------------------------------------------------------
+        (evconf['mag'], maxdist, flen, fwid, xlim, ylim, faultplane.get_top_edge_depth()))
     dkm = calcconf['grid']['griddkm']
     nx = ceil(xlim/dkm)
     xdist = nx*dkm
@@ -540,24 +562,46 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 0., ydist, 0., ny+1)
     inlats = np.concatenate([latsr[:-1], lats])
     lons, lats = np.meshgrid(inlons, inlats)
-    nr = lons.shape[0]
-    nc = lons.shape[1]
-    #mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
     mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
+    return mesh
+
+
+def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
+    '''
+    Create Distance and Sites Contexts for a grid of points, fixed vs30
+    Args:
+        evconf: event configuration
+        calcconf: calculation configuration
+        rctx: RuptureContext for fault
+        faultplane: PlanarSurface for fault
+        bPlots: boolean to control plot generation
+    Return:
+        dctx: DistanceContext for the list of points
+        sctx: SitesContext for the list of points
+    '''
+    if 'mesh' not in calcconf:
+        mesh = make_mesh(evconf, calcconf, faultplane)
+    # --------------------------------------------------------------------------
+    # Distance context
+    # --------------------------------------------------------------------------
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
     rhyp = []
-    for y in inlats:
-        for x in inlons:
-            rhyp.append(geodetic.distance(x, y, 0., clon, clat, rctx.hypo_depth))
+    bb = faultplane.get_bounding_box()
+    clon = bb.west + ((bb.east - bb.west) / 2.)
+    clat = bb.south + ((bb.north - bb.south) / 2.)
+    for y, x in zip(mesh.lats, mesh.lons):
+        rhyp.append(geodetic.distance(x, y, 0., clon, clat, rctx.hypo_depth))
     dctx.rhypo = np.asarray(rhyp)
     dctx.rx = faultplane.get_rx_distance(mesh)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
     dctx.rrup = faultplane.get_min_distance(mesh)
 
+    nr = len(set(mesh.lats))
+    nc = len(set(mesh.lons))
     dctx.rjb = np.reshape(dctx.rjb, (nr, nc))
     dctx.rvolc = np.reshape(dctx.rvolc, (nr, nc))
     dctx.rhypo = np.reshape(dctx.rhypo, (nr, nc))
@@ -575,7 +619,7 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     # Site context
     # --------------------------------------------------------------------------
     sctx = SitesContext()
-    sctx.sids = np.arange(len(inlons)*len(inlats)).reshape(dctx.rjb.shape)
+    sctx.sids = np.arange(nc*nr).reshape(dctx.rjb.shape)
     #sctx.sids = np.arange(len(dctx.rjb))
     sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['grid']['vs30']
     sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
@@ -585,35 +629,16 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
     return dctx, sctx
 
-
-def computeGM(gmpeconf, evconf, calcconf):
-    '''
-    Compute ground motion using openquake functionality. Use configuration files to define
-    the fault plane and earthquake parameters, points at which to calculate ground motion,
-    GMPEs and calculation settings. Ground motion computed is PGA in log10(cm/s/s) for
-    greater of two horizontals.
-    Args:
-        gmpeconf: GMPE configuration
-        evconf: event configuration
-        calcconf: calculation configuration
-    Return:
-        gm: dictionary with magnitude as key and values: median PGA in log10(cm/s/s), 
-        faultplane (PlanarSurface) object, fault half width distance projected at 
-        surface.
-    '''
-    # --------------------------------------------------------------------------
-    # Get multigmpe from config
-    # --------------------------------------------------------------------------
-    mgmpe = MultiGMPE.__from_config__(gmpeconf)
-    IMT = imt.PGA() # will be in units of "g"
+def createRuptures(evconf, calcconf):
     # --------------------------------------------------------------------------
     # Set rupture basics
     # --------------------------------------------------------------------------
-    gm = {}
     if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
             and evconf['evmech']['geometry'].split('.')[-1] == 'json':
         logger.info('Computing for fault geometry, so ensure no magnitude loop')
         calcconf['magrange']['magmax'] = calcconf['magrange']['magmin']
+
+    rups = {}
     for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
             calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep']):
         # --------------------------------------------------------------------------
@@ -631,12 +656,62 @@ def computeGM(gmpeconf, evconf, calcconf):
         else:
             evconf['mag'] = mag
             l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
+        rups[mag] = {}
         for rctx, faultplane in zip(l_rctx, l_faultplane): 
             centroid = faultplane.get_middle_point()
+            rups[mag][(centroid.latitude, centroid.longitude)] = [rctx, faultplane]
+    return rups
+
+
+def computeGM(gmpeconf, evconf, calcconf):
+    '''
+    Compute ground motion using openquake functionality. Use configuration files to define
+    the fault plane and earthquake parameters, points at which to calculate ground motion,
+    GMPEs and calculation settings. Ground motion computed is PGA in log10(cm/s/s) for
+    greater of two horizontals.
+    Args:
+        gmpeconf: GMPE configuration
+        evconf: event configuration
+        calcconf: calculation configuration
+    Return:
+        gm: dictionary with magnitude as key and values: median PGA in log10(cm/s/s), 
+        faultplane (PlanarSurface) object, fault half width distance projected at 
+        surface.
+    '''
+    rups = createRuptures(evconf, calcconf)
+    template_sets = None
+    if 'fault-specific' in calcconf:
+        template_sets = createTemplateSets([(m, clat, clon) for m in rups for (clat, clon) in rups[m]], calcconf)
+        if 'grid' in calcconf and calcconf['grid']['compute']:
+            for i in template_sets:
+                l_mesh = []
+                for mag in rups:
+                    for clat, clon in rups[mag]:
+                        l_mesh.append(make_mesh(evconf, calcconf, rups[mag][(clat, clon)][1]))
+                minlat = min([min(mesh.lats) for mesh in l_mesh])
+                maxlat = max([max(mesh.lats) for mesh in l_mesh])
+                minlon = min([min(mesh.lons) for mesh in l_mesh])
+                maxlon = max([max(mesh.lons) for mesh in l_mesh])
+                template_sets[i]['mesh'] = mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon)
+
+    # --------------------------------------------------------------------------
+    # Get multigmpe from config
+    # --------------------------------------------------------------------------
+    mgmpe = MultiGMPE.__from_config__(gmpeconf)
+    IMT = imt.PGA() # will be in units of "g"
+    gm = {}
+    tset = None
+    for mag in rups:
+        for centroid_lat, centroid_lon in rups[mag]: 
+            rctx, faultplane = rups[mag][(centroid_lat, centroid_lon)]
             # --------------------------------------------------------------------------
             # Distance and Source contexts
             # --------------------------------------------------------------------------
             if 'grid' in calcconf and calcconf['grid']['compute']:
+                for i in template_sets:
+                    if mag in template_sets and (centroid_lat, centroid_lon) in template_sets[mag]:
+                        tset = i
+                        calcconf['mesh'] = template_sets[i]['mesh']
                 dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'points' in calcconf and calcconf['points']['compute']:
                 dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
@@ -663,8 +738,117 @@ def computeGM(gmpeconf, evconf, calcconf):
             # mean value as a natural logarithm of intensity.
             if mag not in gm:
                 gm[mag] = {}
-            gm[mag][(centroid.latitude, centroid.longitude)] = [lng2cm(lmean_mgmpe), faultplane]
-    return gm, evconf
+            gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane]
+    return gm, evconf, template_sets
+
+
+def createTemplateSets(data, calcconf):
+    '''
+    Split a set of magnitudes and centroid locations in sets based on the allowable number using both
+    max and min per magnitude
+    Args:
+    - data: list of [mag, centroid_lat, centroid_lat]
+    - calcconf: configuration 
+    Return:
+    - 
+    '''
+    from math import ceil
+    maxperset = calcconf['fault-specific']['maxperset']
+    minperset = calcconf['fault-specific']['minperset']
+    # Convert input list into dictionary with key as magnitude and centroid as value
+    templates = {}
+    for d in data:
+        if d[0] not in templates:
+            templates[d[0]] = [[float(d[1]), float(d[2])]]
+        else:
+            templates[d[0]].append([float(d[1]), float(d[2])])
+    n_tot_sets = 0
+    while len([t for m in templates for t in templates[m] if len(t) < 3]) > 0:
+        logger.info(f'Templates without a set: {len([t for m in templates for t in templates[m] if len(t) < 3])}')
+        # Minimum magnitude for this set
+        minmag = None
+        for mag in templates:
+            t = [t for t in templates[mag] if len(t) == 2]
+            if len(t) > 0:
+                minmag = mag
+                break
+        if minmag is None:
+            return templates, 0
+        # Determine the number of minimum magnitude templates for each set
+        sets = []
+        ntot = len(templates[minmag])
+        nsets = round(ntot/maxperset)
+        if nsets == 0:
+            nsets = 1
+        basen = ntot//nsets
+        left = ntot%basen
+        extras = ceil((left)/nsets)
+        logger.info(f'For minmag: {minmag}, # templates: {ntot}, # sets: {nsets}, min # in set {basen}, remainder: {left}, extras per set: {extras}')
+        # Determine the start/stop indices for each set for the minimum magnitude templates
+        rsum = 0
+        for i in range(nsets):
+            rsum += basen
+            if left > 0:
+                rsum += extras
+                left -= extras
+            sets.append(rsum)
+        logger.info(f'Minmag template end indices {sets}')
+        # Add templates from minimum magnitude
+        setbb = []
+        start = 0
+        for i, end in enumerate(sets):
+            tset = templates[minmag][start:end]
+            for t in tset:
+                t.append(i+n_tot_sets)
+            sclat = tset[0][0]
+            eclat = tset[-1][0]
+            sclon = tset[0][1]
+            eclon = tset[-1][1]
+            setbb.append([sclat, eclat, sclon, eclon])
+            start = end
+        # Add templates from minimum magnitude
+        maxmag = None
+        tol = 0.01
+        for i, bb in enumerate(setbb):
+            if i == 0: 
+                slat = bb[0]
+                slon = bb[2]
+            else:
+                slat = (setbb[i-1][1] + bb[0])/2
+                slon = (setbb[i-1][3] + bb[2])/2
+            if i == len(setbb)-1:
+                elat = bb[1]
+                elon = bb[3]
+            else:
+                elat = (setbb[i+1][0] + bb[1])/2
+                elon = (setbb[i+1][2] + bb[3])/2
+            minclat = min([slat, elat]) - tol
+            maxclat = max([slat, elat]) + tol
+            minclon = min([slon, elon]) - tol
+            maxclon = max([slon, elon]) + tol
+            for mag in [m for m in templates if m > minmag]:
+                if maxmag is not None and mag >= maxmag:
+                    break
+                # get all templates for this mag with centroids in min/max range
+                n_tset = [t for t in templates[mag] if \
+                        t[0] >= minclat and t[0] <= maxclat and \
+                        t[1] >= minclon and t[1] <= maxclon]
+                if maxmag is None and len(templates[mag]) > minperset and len(n_tset) < minperset:
+                    logger.info(f'Set maxmag: {mag}')
+                    maxmag = mag
+                    break
+                for t in n_tset:
+                    t.append(i+n_tot_sets)
+        n_tot_sets += len(sets)
+    template_sets = {}
+    for i in range(n_tot_sets):
+        template_sets[i] = {}
+        for mag in templates:
+            templs = [t[0:2] for t in templates[mag] if t[-1] == i]
+            if len(templs) == 0:
+                continue
+            template_sets[i][mag] = templs
+    return template_sets
 
 
 ##################################################################################################

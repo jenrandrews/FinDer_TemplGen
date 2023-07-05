@@ -67,9 +67,9 @@ if __name__ == "__main__":
             continue
         evconf['evmech']['geometry'] = os.path.join(rdir, f)
         nind = f.replace('rupture_','').replace('.json','')
-        gm, evconf = woq.computeGM(gmpeconf, evconf, calcconf)
+        gm, evconf, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
         mag = list(gm.keys())[0]
-        lmean_mgmpe, faultplane, xcorr = gm[mag]
+        lmean_mgmpe, faultplane = gm[mag]
         maxpga = np.amax(lmean_mgmpe)
         logging.info('Max PGA: %.4f' % maxpga)
         if maxpga < log10(2.):

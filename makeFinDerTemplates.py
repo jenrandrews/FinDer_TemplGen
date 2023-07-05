@@ -46,7 +46,7 @@ if __name__ == "__main__":
     evconf = woq.importConfig(args.evconf)
     calcconf = woq.importConfig(args.calcconf)
 
-    gm, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
+    gm, dummy, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
 
     dkm = calcconf['grid']['griddkm']
     if 'rupinfo' in calcconf and calcconf['rupinfo']:
@@ -56,7 +56,7 @@ if __name__ == "__main__":
         fout2 = open('template_info.txt', 'w')
     for mag in gm:
         for centroid_lat, centroid_lon in gm[mag]:
-            lmean_mgmpe, faultplane, xcorr = gm[mag]
+            lmean_mgmpe, faultplane = gm[mag]
             flen = faultplane.get_area()/faultplane.get_width()
             oname = 'template_L%.6f_Azi0.txt' % flen
             if 'rupinfo' in calcconf and calcconf['rupinfo']:
