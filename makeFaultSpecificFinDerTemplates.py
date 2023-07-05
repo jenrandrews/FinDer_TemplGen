@@ -60,10 +60,10 @@ if __name__ == "__main__":
                 evconf['evmech']['dip']))
             fout2 = open(os.path.join(odir, 'template_info.txt'), 'w')
             with open(os.path.join(odir, 'latitude.dat'), 'w') as fout3:
-                for lat in set(templ_sets[tset]['mesh'].lats):
+                for lat in sorted(set(templ_sets[tset]['mesh'].lats)):
                     fout3.write(f'{lat:.6f}\n')
             with open(os.path.join(odir, 'longitude.dat'), 'w') as fout4:
-                for lon in set(templ_sets[tset]['mesh'].lons):
+                for lon in sorted(set(templ_sets[tset]['mesh'].lons)):
                     fout4.write(f'{lon:.6f}\n')
         for mag in templ_sets[tset]:
             if mag == 'mesh':

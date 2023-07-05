@@ -249,6 +249,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     farea = scalrel.get_median_area(evconf['mag'], evconf['evmech']['rake'])
     logger.info(f'Fault dimensions: {farea}, {flen}, {fwid}, {flen*fwid}, {flen/fwid}')
     diprad = radians(evconf['evmech']['dip'])
+    xcorr = cos(diprad) * 0.5 * fwid
 
     # Set the iteration for multiple overlapping fault patches
     # Overlap is 10% or 20 km
@@ -705,6 +706,7 @@ def computeGM(gmpeconf, evconf, calcconf):
     tset = None
     for mag in rups:
         for centroid_lat, centroid_lon in rups[mag]: 
+            evconf['mag'] = mag
             rctx, faultplane = rups[mag][(centroid_lat, centroid_lon)]
             # --------------------------------------------------------------------------
             # Distance and Source contexts
