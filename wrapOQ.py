@@ -249,7 +249,6 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     farea = scalrel.get_median_area(evconf['mag'], evconf['evmech']['rake'])
     logger.info(f'Fault dimensions: {farea}, {flen}, {fwid}, {flen*fwid}, {flen/fwid}')
     diprad = radians(evconf['evmech']['dip'])
-    xcorr = cos(diprad) * 0.5 * fwid
 
     # Set the iteration for multiple overlapping fault patches
     # Overlap is 10% or 20 km
@@ -286,7 +285,10 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             approx_strike = 360. + theta
         else:
             approx_strike = theta
+        # Start each with positive
+        xcorr = abs(xcorr)
         side = 'left'
+        #
         if abs(approx_strike - evconf['evmech']['strike']) < 90. and xcorr > 0.:
             xcorr *= -1.
             side = 'right'
