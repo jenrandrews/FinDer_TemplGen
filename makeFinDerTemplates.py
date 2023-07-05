@@ -46,7 +46,7 @@ if __name__ == "__main__":
     evconf = woq.importConfig(args.evconf)
     calcconf = woq.importConfig(args.calcconf)
 
-    gm = woq.computeGM(gmpeconf, evconf, calcconf)
+    gm, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
 
     dkm = calcconf['grid']['griddkm']
     if 'rupinfo' in calcconf and calcconf['rupinfo']:

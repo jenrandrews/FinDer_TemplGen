@@ -17,7 +17,8 @@ from openquake.hazardlib import imt, const
 from openquake.hazardlib.gsim.base import RuptureContext
 from openquake.hazardlib.gsim.base import DistancesContext
 from openquake.hazardlib.gsim.base import SitesContext
-from openquake.hazardlib.geo import geodetic, Point, PlanarSurface, Mesh, RectangularMesh
+from openquake.hazardlib.geo import geodetic, Point, Line, Mesh, RectangularMesh
+from openquake.hazardlib.geo.surface import PlanarSurface, SimpleFaultSurface, ComplexFaultSurface
 
 # shakemap imports
 from shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
@@ -95,6 +96,57 @@ def importConfig(fname):
     ddict = eval(ntext)
     return ddict
 
+def importRuptureContext(evconf):
+    '''
+    Creates RuptureContext based on configuration file input for a fault mesh
+    Args:
+        evconf: event configuration
+    Return:
+        rctx: RuptureContext for rupture
+        faultplane: PlanarSurface for rupture
+        xcorr: fault half width distance projected at surface
+    '''
+    from json import JSONDecoder
+    with open(evconf['evmech']['geometry'], 'r') as fin:
+        rup = JSONDecoder().decode(fin.read())
+    evconf['mag'] = rup['metadata']['mag']
+    if 'evloc' not in evconf:
+        evconf['evloc'] = {}
+    evconf['evloc']['centroid_lat'] = rup['metadata']['lat']
+    evconf['evloc']['centroid_lon'] = rup['metadata']['lon']
+    evconf['evloc']['hypo_depth'] = rup['metadata']['depth']
+    ptlist = []
+    allpts = len(rup['features'][0]['geometry']['coordinates'][0][0])
+    for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
+        ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
+    evconf['flist'] = ptlist
+#    faultplane = SimpleFaultSurface.from_fault_data(fault_trace=Line(ptlist[:allpts//2]), 
+#            upper_seismogenic_depth=ptlist[0].depth,
+#            lower_seismogenic_depth=ptlist[-2].depth, 
+#            dip=evconf['evmech']['dip'], 
+#            mesh_spacing=1.0)
+    topedge = ptlist[:allpts//2]
+    bottomedge = ptlist[allpts//2:-1][::-1]
+    faultplane = ComplexFaultSurface.from_fault_data(edges=[Line(topedge), 
+            Line(bottomedge)],
+            mesh_spacing=1.0)
+    rctx = RuptureContext()
+    rctx.strike = faultplane.get_strike()
+    evconf['evmech']['strike'] = rctx.strike
+    rctx.rake = evconf['evmech']['rake']
+    rctx.dip = evconf['evmech']['dip']
+    rctx.mag = evconf['mag']
+    rctx.hypo_depth = evconf['evloc']['hypo_depth']
+    rctx.width = faultplane.get_width()
+#    rctx.width = geodetic.distance(ptlist[0].longitude, ptlist[0].latitude, ptlist[0].depth, 
+#            ptlist[-2].longitude, ptlist[-2].latitude, ptlist[-2].depth)
+    rctx.ztor = 0.1
+    if False:
+        import matplotlib.pyplot as plt
+        plt.plot([p.longitude for p in ptlist], [p.latitude for p in ptlist])
+        plt.scatter(faultplane.mesh.lons, faultplane.mesh.lats)
+        plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
+    return evconf, rctx, faultplane, 0.
 
 def createRuptureContext(evconf, calcconf):
     '''
@@ -134,11 +186,12 @@ def createRuptureContext(evconf, calcconf):
     flen = scalrel.get_median_length(rctx.mag, rctx.rake)
     fwid = scalrel.get_median_width(rctx.mag, rctx.rake)
     # Note that mag range extends width relation beyond validity, so fix assumes
-    # len = wid when wid > len
+    # len = wid when wid > len, i.e. aspect ratio 1.
     if fwid > flen: 
         rctx.width = flen
     else:
         rctx.width = fwid
+    farea = scalrel.get_median_area(rctx.mag, rctx.rake)
     # For FinDer, centroid must be kept at center of template
     # Use initial hypo depth as centroid depth unless width requires us to move it
     # Hypo depth empirically found to be at about 60% depth, but simpler to treat as 50% here
@@ -168,6 +221,7 @@ def createRuptureContext(evconf, calcconf):
         offset = (sin(diprad) * rctx.width * 0.5)
         rctx.ztor = centroid_depth - offset
         maxz = centroid_depth + offset
+    logger.info(f'Fault dimensions: {farea}, {flen}, {rctx.width}, {flen*rctx.width}, {flen/rctx.width}')
     # Fault plane defined as 
     # lat: -0.5 fault_len to +0.5 fault_len; 
     # lon: -0.5 projected width to +0.5 projected width
@@ -182,13 +236,17 @@ def createRuptureContext(evconf, calcconf):
     tr_lon, tr_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+270., xcorr) 
     bl_lon, bl_lat = geodetic.point_at(e2_lon, e2_lat, evconf['evmech']['strike']+90., xcorr) 
     br_lon, br_lat = geodetic.point_at(e1_lon, e1_lat, evconf['evmech']['strike']+90., xcorr) 
-    logging.info('Fault corners: (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f)' % 
+    logger.info('Fault corners: (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f) (%.4f, %.4f)' % 
             (tl_lon, tl_lat, tr_lon, tr_lat, bl_lon, bl_lat, br_lon, br_lat))
     faultplane = PlanarSurface(strike=evconf['evmech']['strike'], dip=rctx.dip, 
             top_left=Point(depth=rctx.ztor, latitude=tl_lat, longitude=tl_lon),
             top_right=Point(depth=rctx.ztor, latitude=tr_lat, longitude=tr_lon),
             bottom_left=Point(depth=maxz, latitude=bl_lat, longitude=bl_lon),
             bottom_right=Point(depth=maxz, latitude=br_lat, longitude=br_lon))
+    #fptest = PlanarSurface.from_hypocenter(Point(0., 0., rctx.hypo_depth), scalrel, rctx.mag, flen/rctx.width, 
+    #    evconf['evmech']['strike'], rctx.dip, rctx.rake, ztor=None)
+    logger.info(f'faultplane: {faultplane.get_surface_boundaries()}') 
+    #logger.info(f'fptest: {fptest.get_surface_boundaries()}') 
     return rctx, faultplane, xcorr
 
 
@@ -243,31 +301,19 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     dctx.rhypo = np.asarray(rhyp).reshape(len(lats))
     dctx.rx = faultplane.get_rx_distance(mesh)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
-    if rctx.dip == 90.:
-        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
-    else:
-        diprad = radians(rctx.dip)
-        # Very frustrating that we have to do this!
-        # Eq 14-20 Kaklamanos et al. (2011)
-        Acond = rctx.ztor * tan(diprad)
-        A = pow(rctx.ztor,2)
-        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
-        Ccond = Acond + (rctx.width / cos(diprad))
-        A = rctx.width * cos(diprad)
-        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
-        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
-        A = sin(diprad)
-        B = rctx.ztor * cos(diprad)
-        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
-        rrupp = Arrupp + Brrupp + Crrupp
-        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
+    dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
     if bPlots:
         import matplotlib.pyplot as plt
         flat = []
         flon = []
-        for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, faultplane.bottom_left, faultplane.top_left]:
-            flat.append(x.latitude)
-            flon.append(x.longitude)
+        if isinstance(faultplane, PlanarSurface):
+            for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, faultplane.bottom_left, faultplane.top_left]:
+                flat.append(x.latitude)
+                flon.append(x.longitude)
+        else:
+            for x in evconf['flist']:
+                flat.append(x.latitude)
+                flon.append(x.longitude)
         for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
             cb = plt.scatter(lons, lats, c=[log10(x) if x>0 else 0 for x in v])
             plt.scatter(evconf['evloc']['centroid_lon'], evconf['evloc']['centroid_lat'], marker='*', s=80)
@@ -316,28 +362,7 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     dctx.rhypo = np.full((1, 1), np.sqrt(pow(rjb, 2) + pow(rctx.hypo_depth, 2)))
     dctx.rx = dctx.rjb
     dctx.ry0 = np.zeros_like(dctx.rjb)
-    # For long faults, the get_min_distance function appears to only use the corners to 
-    # compute horizontal distance, resulting in Rrup >> actual
-    # If future libs fix this issue, reinstate following line:
-    #dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
-    if rctx.dip == 90.:
-        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
-    else:
-        diprad = radians(rctx.dip)
-        # Very frustrating that we have to do this!
-        # Eq 14-20 Kaklamanos et al. (2011)
-        Acond = rctx.ztor * tan(diprad)
-        A = pow(rctx.ztor,2)
-        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
-        Ccond = Acond + (rctx.width / cos(diprad))
-        A = rctx.width * cos(diprad)
-        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
-        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
-        A = sin(diprad)
-        B = rctx.ztor * cos(diprad)
-        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
-        rrupp = Arrupp + Brrupp + Crrupp
-        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
+    dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
     # --------------------------------------------------------------------------
     # Site context
     # --------------------------------------------------------------------------
@@ -369,81 +394,69 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, xcorr, bPlots = False):
     # ----
     # Empirical estimate for maximum distance needed in template grid
     # ----
-    flen = faultplane.get_area()/faultplane.get_width()
-    fwid = faultplane.get_width()
-    maxz = faultplane.bottom_left.depth
     maxdist = max([evconf['mag']*115. - 400., evconf['mag']*40 - 95])
-    logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f/%.4f ztor %.2f zmax %.2f' % \
-        (evconf['mag'], maxdist, flen, fwid, rctx.width, rctx.ztor, maxz))
-    xlim = xcorr + maxdist
-    ylim = (flen/2.) + maxdist
+    if isinstance(faultplane, PlanarSurface):
+        flen = faultplane.get_area()/faultplane.get_width()
+        fwid = faultplane.get_width()
+        xlim = xcorr + maxdist
+        ylim = (flen/2.) + maxdist
+        clat = evconf['evloc']['centroid_lat']
+        clon = evconf['evloc']['centroid_lon']
+        logger.info(r'Mag %.1f  Max dist %.4f Rup len %.4f Rup wid %.4f/%.4f ztor %.2f' % \
+            (evconf['mag'], maxdist, flen, fwid, rctx.width, rctx.ztor))
+    else:
+        bb = faultplane.get_bounding_box()
+        clon = bb.west + ((bb.east - bb.west) / 2.)
+        clat = bb.south + ((bb.north - bb.south) / 2.)
+        xlim = geodetic.distance(clon, clat, 0., bb.east, clat, 0.) + maxdist
+        ylim = geodetic.distance(clon, clat, 0., clon, bb.north, 0.) + maxdist
+        logger.info(r'Mag %.1f  Max dist %.4f xlim %.4f ylim %.4f ztor %.2f' % \
+            (evconf['mag'], maxdist, xlim, ylim, rctx.ztor))
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
     dkm = calcconf['grid']['griddkm']
     nx = ceil(xlim/dkm)
     xdist = nx*dkm
-    lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 0., 270., xdist, 0., nx+1)
+    lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 270., xdist, 0., nx+1)
     lonsr = np.flip(lons)
-    lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 0., 90., xdist, 0., nx+1)
+    lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 90., xdist, 0., nx+1)
     inlons = np.concatenate([lonsr[:-1], lons])
     ny = ceil(ylim/dkm)
     ydist = ny*dkm
-    lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 0., 180., ydist, 0., ny+1)
+    lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 180., ydist, 0., ny+1)
     latsr = np.flip(lats)
-    lons, lats, depths = geodetic.npoints_towards(evconf['evloc']['centroid_lon'], 
-            evconf['evloc']['centroid_lat'], 0., 0., ydist, 0., ny+1)
+    lons, lats, depths = geodetic.npoints_towards(clon, clat, 0., 0., ydist, 0., ny+1)
     inlats = np.concatenate([latsr[:-1], lats])
     lons, lats = np.meshgrid(inlons, inlats)
-    mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
+    nr = lons.shape[0]
+    nc = lons.shape[1]
+    #mesh = RectangularMesh(lons=lons, lats=lats, depths=None)
+    mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
-    if dctx.rjb.shape[0] != mesh.shape[0]:
-        dctx.rjb = np.reshape(dctx.rjb, mesh.shape)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
     rhyp = []
     for y in inlats:
         for x in inlons:
-            rhyp.append(geodetic.distance(x, y, 0., evconf['evloc']['centroid_lon'], 
-                evconf['evloc']['centroid_lat'], rctx.hypo_depth))
-    dctx.rhypo = np.asarray(rhyp).reshape(len(inlats), len(inlons))
+            rhyp.append(geodetic.distance(x, y, 0., clon, clat, rctx.hypo_depth))
+    dctx.rhypo = np.asarray(rhyp)
     dctx.rx = faultplane.get_rx_distance(mesh)
-    if dctx.rx.shape[0] != mesh.shape[0]:
-        dctx.rx = np.reshape(dctx.rx, mesh.shape)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
-    if dctx.ry0.shape[0] != mesh.shape[0]:
-        dctx.ry0 = np.reshape(dctx.ry0, mesh.shape)
-    # For long faults, the get_min_distance function appears to only use the corners to 
-    # compute horizontal distance, resulting in Rrup >> actual
-    # If future libs fix this issue, reinstate following line:
-    #dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
-    if rctx.dip == 90.:
-        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
-    else:
-        diprad = radians(rctx.dip)
-        # Very frustrating that we have to do this!
-        # Eq 14-20 Kaklamanos et al. (2011)
-        Acond = rctx.ztor * tan(diprad)
-        A = pow(rctx.ztor,2)
-        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
-        Ccond = Acond + (rctx.width / cos(diprad))
-        A = rctx.width * cos(diprad)
-        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
-        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
-        A = sin(diprad)
-        B = rctx.ztor * cos(diprad)
-        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
-        rrupp = Arrupp + Brrupp + Crrupp
-        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
+    dctx.rrup = faultplane.get_min_distance(mesh)
+
+    dctx.rjb = np.reshape(dctx.rjb, (nr, nc))
+    dctx.rvolc = np.reshape(dctx.rvolc, (nr, nc))
+    dctx.rhypo = np.reshape(dctx.rhypo, (nr, nc))
+    dctx.rx = np.reshape(dctx.rx, (nr, nc))
+    dctx.ry0 = np.reshape(dctx.ry0, (nr, nc))
+    dctx.rrup = np.reshape(dctx.rrup, (nr, nc))
     if bPlots:
         import matplotlib.pyplot as plt
         for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
-            cb = plt.imshow(v)
+            cb = plt.imshow(v, origin='lower')
             plt.colorbar(cb)
             plt.savefig('%s_M%.1f.png' % (lbl, evconf['mag']))
             plt.close()
@@ -491,8 +504,12 @@ def computeGM(gmpeconf, evconf, calcconf):
         # --------------------------------------------------------------------------
         # Rupture context
         # --------------------------------------------------------------------------
-        evconf['mag'] = mag
-        rctx, faultplane, xcorr = createRuptureContext(evconf, calcconf)
+        if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
+            evconf, rctx, faultplane, xcorr = importRuptureContext(evconf)
+            mag = evconf['mag']
+        else:
+            evconf['mag'] = mag
+            rctx, faultplane, xcorr = createRuptureContext(evconf, calcconf)
         # --------------------------------------------------------------------------
         # Distance and Source contexts
         # --------------------------------------------------------------------------
@@ -522,7 +539,9 @@ def computeGM(gmpeconf, evconf, calcconf):
         # Method get_mean_and_stddevs() of actual GMPE implementations is supposed to return the 
         # mean value as a natural logarithm of intensity.
         gm[mag] = [lng2cm(lmean_mgmpe), faultplane, xcorr]
-    return gm
+        if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
+            break
+    return gm, evconf
 
 
 ##################################################################################################
@@ -586,3 +605,28 @@ def computeGM(gmpeconf, evconf, calcconf):
 #            templ_all = np.vstack((templ_top, templ_mid, templ_bottom))
 #        else:
 #            templ_all = np.vstack((templ_top, templ_bottom))
+
+###
+### Code to compute rrup geometrically
+# Originally for long faults, the get_min_distance function 
+# appears to only use the corners to 
+# compute horizontal distance, resulting in Rrup >> actual
+###
+#    if rctx.dip == 90.:
+#        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
+#    else:
+#        diprad = radians(rctx.dip)
+#        # Very frustrating that we have to do this!
+#        # Eq 14-20 Kaklamanos et al. (2011)
+#        Acond = rctx.ztor * tan(diprad)
+#        A = pow(rctx.ztor,2)
+#        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
+#        Ccond = Acond + (rctx.width / cos(diprad))
+#        A = rctx.width * cos(diprad)
+#        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
+#        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
+#        A = sin(diprad)
+#        B = rctx.ztor * cos(diprad)
+#        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
+#        rrupp = Arrupp + Brrupp + Crrupp
+#        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))
