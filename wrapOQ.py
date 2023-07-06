@@ -41,9 +41,9 @@ def lng2cm(inx):
     '''
     Convert PGA in ln(g) to log10(cm/s/s)
     Args:
-        Numpy array of PGA values in ln(g)
+    - Numpy array of PGA values in ln(g)
     Return:
-        Numpy array of PGA values in log10(cm/s/s)
+    - Numpy array of PGA values in log10(cm/s/s)
     '''
     inx = np.log10(np.exp(inx)) + log10(980.665)
     return inx
@@ -55,9 +55,9 @@ def getScalingRelation(conf):
     Allowing for extension to other scaling relations. However, all will require an Ext class to 
     provide length and width rather than area.
     Args:
-        conf: configuration dictionary
+    - conf: configuration dictionary
     Return:
-        ScalingRelation class object
+    - ScalingRelation class object
     '''
     if conf['scaling_relation']['scalrel'] == 'Leonard2014_Interplate':
         return Leonard2014_Interplate_Ext.Leonard2014_Interplate_Ext()
@@ -81,9 +81,9 @@ def importConfig(fname):
     Configuration file format expected (json) so that 'eval' works.
     Lines beginning with # are ignored.
     Args:
-        fname: filename
+    - fname: filename
     Return:
-        Dictionary with contents of configuration file
+    - Dictionary with contents of configuration file
     '''
     fin = open(fname, 'r')
     text = fin.read()
@@ -97,14 +97,15 @@ def importConfig(fname):
     ddict = eval(ntext)
     return ddict
 
+
 def importRuptureContext(evconf):
     '''
     Creates RuptureContext based on configuration file input for a fault mesh
     Args:
-        evconf: event configuration
+    - evconf: event configuration
     Return:
-        rctx: RuptureContext for rupture
-        faultplane: PlanarSurface for rupture
+    - rctx: RuptureContext for rupture
+    - faultplane: PlanarSurface for rupture
     '''
     from json import JSONDecoder
     with open(evconf['evmech']['geometry'], 'r') as fin:
@@ -209,6 +210,39 @@ def adjustRCTXparams(rctx, seismogenic_depth, centroid_depth):
     return rctx, maxz, centroid_depth
 
 
+def createCentroidPolygon(calcconf, centroids):
+    '''
+    Create a polygon around an input set of centroids
+    Args:
+    - calcconf: calculation configuration
+    - centroids: list of [lon, lat] points
+    Return:
+    -  polygon
+    '''
+    if len(centroids) < 2:
+        # This should be a circle if 1 point
+        return None
+    if 'centroid_polygon_dist' not in calcconf['fault-specific']:
+        return None
+
+    import shapely as shp
+    import shapely.ops as ops
+    import pyproj
+    # Set up the projections
+    wgs84 = pyproj.Proj(init='epsg:4326')
+    nz = pyproj.Proj(init=f'epsg:{calcconf["fault-specific"]["epsg"]}')
+    project = pyproj.Transformer.from_proj(wgs84, nz)
+    rev_project = pyproj.Transformer.from_proj(nz, wgs84)
+    # Create line and buffer
+    line = shp.geometry.LineString(centroids)
+    line_cart = ops.transform(project.transform, line)
+    xcorr = calcconf['fault-specific']['centroid_polygon_dist']
+    poly_cart = line_cart.buffer(xcorr * 1000, cap_style=1)
+    poly = ops.transform(rev_project.transform, poly_cart)
+    npoly = poly.simplify(0.01, preserve_topology=False)
+    return npoly
+
+
 def createSubFaultRuptureContexts(evconf, calcconf):
     '''
     Create fault-specific ruptures for magnitudes in range
@@ -225,7 +259,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
 
     # Set up the projections
     wgs84 = pyproj.Proj(init='epsg:4326')
-    nz = pyproj.Proj(init='epsg:27200')
+    nz = pyproj.Proj(init=f'epsg:{calcconf["fault-specific"]["epsg"]}')
     project = pyproj.Transformer.from_proj(wgs84, nz)
     rev_project = pyproj.Transformer.from_proj(nz, wgs84)
 
@@ -319,11 +353,11 @@ def createRuptureContext(evconf, calcconf):
     large faults. To compute rupture plane corners from centroid, openquake geodetic functions
     are used, but note that errors accumulate for large distances.
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
+    - evconf: event configuration
+    - calcconf: calculation configuration
     Return:
-        rctx: RuptureContext for rupture
-        faultplane: PlanarSurface for rupture
+    - rctx: RuptureContext for rupture
+    - faultplane: PlanarSurface for rupture
     '''
     seismogenic_depth = evconf['seisstruc']['seismogenic_depth']
     scalrel = getScalingRelation(calcconf)
@@ -380,14 +414,14 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a list of points
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
-        rctx: RuptureContext for fault
-        faultplane: PlanarSurface for fault
-        bPlots: boolean to control plot generation
+    - evconf: event configuration
+    - calcconf: calculation configuration
+    - rctx: RuptureContext for fault
+    - faultplane: PlanarSurface for fault
+    - bPlots: boolean to control plot generation
     Return:
-        dctx: DistanceContext for the list of points
-        sctx: SitesContext for the list of points
+    - dctx: DistanceContext for the list of points
+    - sctx: SitesContext for the list of points
     '''
     if not os.path.isfile(calcconf['points']['points_file']):
         return None, None
@@ -465,14 +499,14 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     Create Distance and Sites Contexts for a point at fixed Rjb alongside fault and with
     fixed vs30. Other distance measures are computed.
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
-        rctx: RuptureContext for fault
-        faultplane: PlanarSurface for fault
-        bPlots: boolean to control plot generation
+    - evconf: event configuration
+    - calcconf: calculation configuration
+    - rctx: RuptureContext for fault
+    - faultplane: PlanarSurface for fault
+    - bPlots: boolean to control plot generation
     Return:
-        dctx: DistanceContext for the list of points
-        sctx: SitesContext for the list of points
+    - dctx: DistanceContext for the list of points
+    - sctx: SitesContext for the list of points
     '''
     # --------------------------------------------------------------------------
     # Distance context
@@ -524,7 +558,6 @@ def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     lons, inlats, depths = geodetic.npoints_towards(minlon, minlat, 0., 0., ydist, 0., ny+1)
     lons, lats = np.meshgrid(inlons, inlats)
     mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
-    print(xlim, xdist, ylim, ydist, inlons.max(), lons.max(), inlats.max(), lats.max())
     return mesh
 
 
@@ -573,14 +606,14 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a grid of points, fixed vs30
     Args:
-        evconf: event configuration
-        calcconf: calculation configuration
-        rctx: RuptureContext for fault
-        faultplane: PlanarSurface for fault
-        bPlots: boolean to control plot generation
+    - evconf: event configuration
+    - calcconf: calculation configuration
+    - rctx: RuptureContext for fault
+    - faultplane: PlanarSurface for fault
+    - bPlots: boolean to control plot generation
     Return:
-        dctx: DistanceContext for the list of points
-        sctx: SitesContext for the list of points
+    - dctx: DistanceContext for the list of points
+    - sctx: SitesContext for the list of points
     '''
     if 'mesh' not in calcconf:
         mesh = make_mesh(evconf, calcconf, faultplane)
@@ -634,7 +667,15 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
     return dctx, sctx
 
+
 def createRuptures(evconf, calcconf):
+    '''
+    Create rupture based on geometry or basic fault parameters
+    Args:
+    - 
+    Return:
+    - 
+    '''
     # --------------------------------------------------------------------------
     # Set rupture basics
     # --------------------------------------------------------------------------
@@ -642,7 +683,6 @@ def createRuptures(evconf, calcconf):
             and evconf['evmech']['geometry'].split('.')[-1] == 'json':
         logger.info('Computing for fault geometry, so ensure no magnitude loop')
         calcconf['magrange']['magmax'] = calcconf['magrange']['magmin']
-
     rups = {}
     for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
             calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep']):
@@ -675,13 +715,12 @@ def computeGM(gmpeconf, evconf, calcconf):
     GMPEs and calculation settings. Ground motion computed is PGA in log10(cm/s/s) for
     greater of two horizontals.
     Args:
-        gmpeconf: GMPE configuration
-        evconf: event configuration
-        calcconf: calculation configuration
+    - gmpeconf: GMPE configuration
+    - evconf: event configuration
+    - calcconf: calculation configuration
     Return:
-        gm: dictionary with magnitude as key and values: median PGA in log10(cm/s/s), 
-        faultplane (PlanarSurface) object, fault half width distance projected at 
-        surface.
+    - gm: dictionary with magnitude as key and values: median PGA in log10(cm/s/s), 
+    - faultplane (PlanarSurface) object
     '''
     rups = createRuptures(evconf, calcconf)
     template_sets = None
@@ -700,9 +739,7 @@ def computeGM(gmpeconf, evconf, calcconf):
                         l_mesh_lons.append(bb[0])
                         l_mesh_lons.append(bb[2])
                 bb = utils.get_spherical_bounding_box(l_mesh_lons, l_mesh_lats)
-                print(bb)
                 template_sets[i]['mesh'] = mesh_from_bb(calcconf, bb.south, bb.north, bb.west, bb.east)
-                print(template_sets[i]['mesh'].get_convex_hull().get_bbox())
 
     # --------------------------------------------------------------------------
     # Get multigmpe from config
