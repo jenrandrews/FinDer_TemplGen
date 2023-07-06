@@ -42,10 +42,23 @@ The setup of GMPEs uses the same concept of weighted sets as used in ShakeMap, b
 Configure the 'hypo_depth' as the value to be used as centroid in the rupture plane. Once fault width exceeds this depth and/or the seismogenic depth, the centroid depth may be altered within the script, with a note written to log.
 
 ## Computing Ground Motion at Position/Distance
-There are two wrapper scripts available, one designed to create FinDer templates, the other designed to create ground motion scenario data.
+There are three wrapper scripts available designed to create FinDer templates or FinDer scenario input data (data_ files). The different wrappers allow for different input specifications (fault geometry or parameters) and/or different outputs.
+ * makeFinDerTemplates: designed to create generic FinDer templates
+ * makeEventData.py: designed to create fault-specific FinDer templates or scenario data
+ * makeScenarioStnData: designed to create ground motion data for generic fault scenarios
+ * makeFaultSpecificFinDerTemplates: designed to create fault-specific FinDer templates
 
-When using the FinDer template wrapper (makeFinDerTemplates.py), set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler. A fixed vs30 is used and is configured in the configuration file also. The script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True. The rupture info files, as used by FinDer v3, can be created by setting the "rupinfo" configuration option to True.
+### makeFinDerTemplates
+When using the FinDer template wrapper (makeFinDerTemplates.py), in calc.conf set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. The script works internally with (lat, lon) values, as required by ShakeMap's structures, so the fault is placed approximately at the equator to make geographic to distance conversions simpler. A fixed vs30 is used and is configured in the configuration file also. The script will always create symmetric templates, and optionally *also* asymmetric templates if the "asym" configuration option is set to True. The rupture info files, as used by FinDer v3, can be created by setting the "rupinfo" configuration option to True.
 
+### makeEventData
+When specifying a fault geometry (makeEventData.py) to create either templates or scenario data, set a rupture.json file path in the event configuration file (parameter ["evmech"]["geometry"]. The rupture.json should follow the ShakeMap format. Note that the input is currently only expecting a single polygon description with the points 1:N/2 specifying the top edge vertices and points N/2:N-1 specifying the bottom edge vertices, which are used as edges in the constructor of a ComplexFaultSurface. Magnitude and hypocenter location are also read from the rupture.json, so mag and centroid ranges in calc.conf are unused. This could be extended in future. Either ["grid"] or ["points"] in calc.conf can be used.
+
+### makeScenarioStnData
 When using the scenario wrapper (makeScenarioStnData.py), set the configuration parameter ["points"]["compute"] to True and set the path for a points file. That file should contain lines with space delimited fields: lat lon vs30 name. The first three columns will be used as input to the ground motion computation. The name will be used when generating a FinDer data_ file.
 
 A third calculation option is for a single point (["pt"]["compute"] set to True) which simply computes the PGA for a single point at a specified Rjb (km) alongside the fault (i.e. Rx = Rjb and Ry0 = 0) and a specified vs30.
+
+### makeFaultSpecificFinDerTemplates
+When using the fault-specific FinDer template wrapper (makeFaultSpecificFinDerTemplates.py), in calc.conf set the configuration parameter ["grid"]["compute"] to True and supply the griddkm value, i.e. the grid spacing in km. A fixed vs30 is used and is configured in the configuration file also. The rupture info files, as used by FinDer v3, can be created by setting the "rupinfo" configuration option to True.
+

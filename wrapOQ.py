@@ -18,6 +18,7 @@ from openquake.hazardlib.gsim.base import RuptureContext
 from openquake.hazardlib.gsim.base import DistancesContext
 from openquake.hazardlib.gsim.base import SitesContext
 from openquake.hazardlib.geo import geodetic, Point, Line, Mesh, RectangularMesh
+from openquake.hazardlib.geo import utils
 from openquake.hazardlib.geo.surface import PlanarSurface, SimpleFaultSurface, ComplexFaultSurface
 
 # shakemap imports
@@ -249,7 +250,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     farea = scalrel.get_median_area(evconf['mag'], evconf['evmech']['rake'])
     logger.info(f'Fault dimensions: {farea}, {flen}, {fwid}, {flen*fwid}, {flen/fwid}')
     diprad = radians(evconf['evmech']['dip'])
-    xcorr = cos(diprad) * 0.5 * fwid
+    xcorr = cos(diprad) * fwid
 
     # Set the iteration for multiple overlapping fault patches
     # Overlap is 10% or 20 km
@@ -505,10 +506,10 @@ def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     Make a mesh for use as distance context based on extent
     Args:
     - calcconf
-    - minlat
-    - maxlat
-    - minlon
-    - maxlon
+    - minlat: southern latitude
+    - maxlat: northern latitude
+    - minlon: western longitude
+    - maxlon: eastern longitude
     Return:
     - mesh
     '''
@@ -517,14 +518,13 @@ def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     dkm = calcconf['grid']['griddkm']
     nx = ceil(xlim/dkm)
     xdist = nx*dkm
-    inlons, lats, depths = geodetic.npoints_towards(maxlon, minlat, 0., 90., xdist, 0., nx+1)
+    inlons, lats, depths = geodetic.npoints_towards(minlon, maxlat, 0., 90., xdist, 0., nx+1)
     ny = ceil(ylim/dkm)
     ydist = ny*dkm
     lons, inlats, depths = geodetic.npoints_towards(minlon, minlat, 0., 0., ydist, 0., ny+1)
     lons, lats = np.meshgrid(inlons, inlats)
-    nr = lons.shape[0]
-    nc = lons.shape[1]
     mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
+    print(xlim, xdist, ylim, ydist, inlons.max(), lons.max(), inlats.max(), lats.max())
     return mesh
 
 
@@ -532,9 +532,9 @@ def make_mesh(evconf, calcconf, faultplane):
     '''
     Make a mesh for use as distance context
     Args:
-    - evconf
-    - calcconf
-    - faultplane
+    - evconf: event configuration
+    - calcconf: calc configuration
+    - faultplane: complex fault plane
     Return:
     - mesh
     '''
@@ -584,6 +584,8 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     if 'mesh' not in calcconf:
         mesh = make_mesh(evconf, calcconf, faultplane)
+    else:
+        mesh = calcconf['mesh']
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
@@ -686,16 +688,21 @@ def computeGM(gmpeconf, evconf, calcconf):
     if 'fault-specific' in calcconf:
         template_sets = createTemplateSets([(m, clat, clon) for m in rups for (clat, clon) in rups[m]], calcconf)
         if 'grid' in calcconf and calcconf['grid']['compute']:
-            for i in template_sets:
-                l_mesh = []
-                for mag in rups:
-                    for clat, clon in rups[mag]:
-                        l_mesh.append(make_mesh(evconf, calcconf, rups[mag][(clat, clon)][1]))
-                minlat = min([min(mesh.lats) for mesh in l_mesh])
-                maxlat = max([max(mesh.lats) for mesh in l_mesh])
-                minlon = min([min(mesh.lons) for mesh in l_mesh])
-                maxlon = max([max(mesh.lons) for mesh in l_mesh])
-                template_sets[i]['mesh'] = mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon)
+            for i in sorted(template_sets):
+                l_mesh_lats = []
+                l_mesh_lons = []
+                for mag in sorted(rups):
+                    for clat, clon in sorted(rups[mag]):
+                        evconf['mag'] = mag
+                        bb = make_mesh(evconf, calcconf, rups[mag][(clat, clon)][1]).get_convex_hull().get_bbox()
+                        l_mesh_lats.append(bb[1])
+                        l_mesh_lats.append(bb[3])
+                        l_mesh_lons.append(bb[0])
+                        l_mesh_lons.append(bb[2])
+                bb = utils.get_spherical_bounding_box(l_mesh_lons, l_mesh_lats)
+                print(bb)
+                template_sets[i]['mesh'] = mesh_from_bb(calcconf, bb.south, bb.north, bb.west, bb.east)
+                print(template_sets[i]['mesh'].get_convex_hull().get_bbox())
 
     # --------------------------------------------------------------------------
     # Get multigmpe from config
@@ -704,8 +711,8 @@ def computeGM(gmpeconf, evconf, calcconf):
     IMT = imt.PGA() # will be in units of "g"
     gm = {}
     tset = None
-    for mag in rups:
-        for centroid_lat, centroid_lon in rups[mag]: 
+    for mag in sorted(rups):
+        for centroid_lat, centroid_lon in sorted(rups[mag]): 
             evconf['mag'] = mag
             rctx, faultplane = rups[mag][(centroid_lat, centroid_lon)]
             # --------------------------------------------------------------------------
@@ -713,7 +720,7 @@ def computeGM(gmpeconf, evconf, calcconf):
             # --------------------------------------------------------------------------
             if 'grid' in calcconf and calcconf['grid']['compute']:
                 for i in template_sets:
-                    if mag in template_sets and (centroid_lat, centroid_lon) in template_sets[mag]:
+                    if mag in template_sets[i] and [centroid_lat, centroid_lon] in template_sets[i][mag]:
                         tset = i
                         calcconf['mesh'] = template_sets[i]['mesh']
                 dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
