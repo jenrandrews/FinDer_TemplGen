@@ -324,8 +324,9 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         # Start each with positive
         xcorr = abs(xcorr)
         side = 'left'
-        #
-        if abs(approx_strike - evconf['evmech']['strike']) < 90. and xcorr > 0.:
+        delta_strike = abs(approx_strike - evconf['evmech']['strike'])
+        delta_strike = delta_strike if delta_strike < 180. else 360. - delta_strike 
+        if delta_strike < 90. and xcorr > 0.:
             xcorr *= -1.
             side = 'right'
         if int(shp.__version__.split('.')[0]) >= 2:
@@ -730,8 +731,8 @@ def computeGM(gmpeconf, evconf, calcconf):
             for i in sorted(template_sets):
                 l_mesh_lats = []
                 l_mesh_lons = []
-                for mag in sorted(rups):
-                    for clat, clon in sorted(rups[mag]):
+                for mag in sorted(template_sets[i]):
+                    for [clat, clon] in template_sets[i][mag]:
                         evconf['mag'] = mag
                         bb = make_mesh(evconf, calcconf, rups[mag][(clat, clon)][1]).get_convex_hull().get_bbox()
                         l_mesh_lats.append(bb[1])
