@@ -698,7 +698,7 @@ def createRuptures(evconf, calcconf):
                 evconf['mag'] = mag
                 l_rctx, l_faultplane = createSubFaultRuptureContexts(evconf, calcconf)        
                 if l_rctx is None:
-                    return None, evconf
+                    return rups
         else:
             evconf['mag'] = mag
             l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
