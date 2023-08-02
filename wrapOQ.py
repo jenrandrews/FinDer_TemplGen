@@ -757,10 +757,11 @@ def computeGM(gmpeconf, evconf, calcconf):
             # Distance and Source contexts
             # --------------------------------------------------------------------------
             if 'grid' in calcconf and calcconf['grid']['compute']:
-                for i in template_sets:
-                    if mag in template_sets[i] and [centroid_lat, centroid_lon] in template_sets[i][mag]:
-                        tset = i
-                        calcconf['mesh'] = template_sets[i]['mesh']
+                if template_sets is not None:
+                    for i in template_sets:
+                        if mag in template_sets[i] and [centroid_lat, centroid_lon] in template_sets[i][mag]:
+                            tset = i
+                            calcconf['mesh'] = template_sets[i]['mesh']
                 dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'points' in calcconf and calcconf['points']['compute']:
                 dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
