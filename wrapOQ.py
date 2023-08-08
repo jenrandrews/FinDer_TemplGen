@@ -68,7 +68,7 @@ def getScalingRelation(conf):
     elif conf['scaling_relation']['scalrel'] == 'Strasser2010_Intraslab':
         return Strasser2010_Intraslab_Ext.Strasser2010_Intraslab_Ext()
     elif conf['scaling_relation']['scalrel'] == 'Blaser2010':
-        return Blase2010.Blase2010()
+        return Blaser_2010.Blaser2010_Interface()
     elif conf['scaling_relation']['scalrel'] == 'Skarlatoudis2016':
         return Skarlatoudis_2016.Skarlatoudis_2016()
     else:

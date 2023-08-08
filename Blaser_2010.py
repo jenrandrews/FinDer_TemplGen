@@ -41,8 +41,7 @@ class Blaser2010_Interface():
         else:
             # normal
             return pow(10., (0.52 * mag) - 1.91)
-        return
-
+        return None
 
     def get_median_mag_from_length(self, flen, rake=None, setting=None):
         """
@@ -75,8 +74,7 @@ class Blaser2010_Interface():
         else:
             # normal
             return (log10(flen) + 1.91)/0.52
-        return 
-
+        return None
 
     def get_median_width(self, mag, rake=None, setting=None):
         """
@@ -109,8 +107,7 @@ class Blaser2010_Interface():
         else:
             # normal
             return pow(10., (0.36 * mag) - 1.20)
-        return 
-
+        return None
 
     def get_median_mag_from_width(self, fwid, rake=None, setting=None):
         """
@@ -145,3 +142,10 @@ class Blaser2010_Interface():
             return (log10(fwid) + 1.20)/0.36
         return 
 
+    def get_median_area(self, mag, rake=None, setting=None):
+        """
+        Calculates median fault area from magnitude.
+        """
+        length = self.get_median_length(mag, rake, setting)
+        width = self.get_median_length(mag, rake, setting)
+        return length * width
