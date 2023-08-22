@@ -250,7 +250,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     - evconf: event config
     - calcconf: calculation config
     Return:
-    - list of lists, where each list has flist, RuptureContext, faultplane and xoffset
+    - lists, RuptureContexts and faultplanes
     '''
     import shapely as shp
     import shapely.ops as ops
@@ -471,9 +471,12 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
                 flat.append(x.latitude)
                 flon.append(x.longitude)
         else:
-            for x in evconf['flist']:
-                flat.append(x.latitude)
-                flon.append(x.longitude)
+            top = faultplane.surface_nodes[0].nodes[0].nodes[0].nodes[0]
+            bottom = faultplane.surface_nodes[0].nodes[-1].nodes[0].nodes[0]
+            flon.extend([float(x) for x in top.to_str().split('[')[1].split(']')[0].split(',')[::3]])
+            flat.extend([float(x) for x in top.to_str().split('[')[1].split(']')[0].split(',')[1::3]])
+            flon.extend([float(x) for x in bottom.to_str().split('[')[1].split(']')[0].split(',')[::3]])
+            flat.extend([float(x) for x in bottom.to_str().split('[')[1].split(']')[0].split(',')[1::3]])
         for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
             cb = plt.scatter(lons, lats, c=[log10(x) if x>0 else 0 for x in v])
             plt.scatter(evconf['evloc']['centroid_lon'], evconf['evloc']['centroid_lat'], marker='*', s=80)
