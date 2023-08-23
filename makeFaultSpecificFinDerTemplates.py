@@ -97,7 +97,7 @@ if __name__ == "__main__":
         minflen = maxflen = None
         for mag in sorted([m for m in templ_sets[tset] if m != 'mesh']):
             for (centroid_lat, centroid_lon) in sorted(templ_sets[tset][mag]):
-                lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
+                lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
                 fwid = faultplane.get_width()
                 flen = faultplane.get_area()/fwid
                 if minflen is None or flen < minflen:

@@ -73,7 +73,8 @@ if __name__ == "__main__":
         gm, evconf, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
         for mag in gm:
             for (centroid_lat, centroid_lon) in gm[mag]:
-                lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
+#                lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
+                lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
         maxpga = np.amax(lmean_mgmpe)
         logging.info('Max PGA: %.4f' % maxpga)
         if maxpga < log10(2.):
@@ -105,9 +106,10 @@ if __name__ == "__main__":
                     evconf['evloc']['centroid_lon'], 
                     mag, 
                     round(evconf['evmech']['strike'])))
-            for pga, lat, lon, stnn in zip(lmean_mgmpe, lats, lons, stnnames):
+            for pga, lat, lon, stnn, dist in zip(lmean_mgmpe, lats, lons, stnnames, rjb):
                 #fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
-                fout.write('{:.5f} {:.5f} {:.5f}\n'.format(lat, lon, pga))
+                #fout.write('{:.5f} {:.5f} {:.5f}\n'.format(lat, lon, pga))
+                fout.write('{:.5f} {:.5f} {:.5f} {:.2f}\n'.format(lat, lon, pga, dist))
             fout.close()
             if calcconf['plots']:
                 import matplotlib.pyplot as plt

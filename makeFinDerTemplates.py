@@ -56,7 +56,7 @@ if __name__ == "__main__":
         fout2 = open('template_info.txt', 'w')
     for mag in gm:
         for (centroid_lat, centroid_lon) in gm[mag]:
-            lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
+            lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
             flen = faultplane.get_area()/faultplane.get_width()
             oname = 'template_L%.6f_Azi0.txt' % flen
             if 'rupinfo' in calcconf and calcconf['rupinfo']:

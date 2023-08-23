@@ -791,7 +791,7 @@ def computeGM(gmpeconf, evconf, calcconf):
             # mean value as a natural logarithm of intensity.
             if mag not in gm:
                 gm[mag] = {}
-            gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane]
+            gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane, dctx.rjb]
     return gm, evconf, template_sets
 
 

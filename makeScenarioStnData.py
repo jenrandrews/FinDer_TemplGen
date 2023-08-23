@@ -92,7 +92,7 @@ if __name__ == "__main__":
                 for mag in gm:
                     for centroid_lat, centroid_lon in gm[mag]:
                         logging.info('Mag: %.2f' % mag)
-                        lmean_mgmpe, faultplane = gm[mag]
+                        lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
                         maxpga = max(lmean_mgmpe)
                         logging.info('Max PGA: %.4f' % maxpga)
                         if maxpga < log10(2.):
