@@ -98,6 +98,27 @@ def importConfig(fname):
     return ddict
 
 
+def setFaultMeshSpacing(evconf, flen):
+    '''
+    Set the fault mesh spacing based on configuration parameter, or fault
+    length if parameter not set, or too large.
+    Args:
+    - evconf: event configuration
+    - flen: fault length computed from fault description
+    Return:
+    - fmesh: fault mesh spacing
+    '''
+    if 'fault_mesh_spacing' in evconf['evmech']:
+        fmesh = evconf['evmech']['fault_mesh_spacing']
+    else:
+        fmesh = 1.
+    logging.info(f'Fault mesh spacing set to: {fmesh} km')
+    if flen/fmesh < 3.:
+        fmesh = flen/3.
+        logging.warn(f'Resetting fault mesh spacing to finer value: {fmesh} km')
+    return fmesh
+
+
 def importRuptureContext(evconf):
     '''
     Creates RuptureContext based on configuration file input for a fault mesh
@@ -105,7 +126,7 @@ def importRuptureContext(evconf):
     - evconf: event configuration
     Return:
     - rctx: RuptureContext for rupture
-    - faultplane: PlanarSurface for rupture
+    - faultplane: ComplexFaultSurface for rupture
     '''
     from json import JSONDecoder
     with open(evconf['evmech']['geometry'], 'r') as fin:
@@ -120,16 +141,14 @@ def importRuptureContext(evconf):
     allpts = len(rup['features'][0]['geometry']['coordinates'][0][0])
     for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
         ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
-#    faultplane = SimpleFaultSurface.from_fault_data(fault_trace=Line(ptlist[:allpts//2]), 
-#            upper_seismogenic_depth=ptlist[0].depth,
-#            lower_seismogenic_depth=ptlist[-2].depth, 
-#            dip=evconf['evmech']['dip'], 
-#            mesh_spacing=1.0)
     topedge = ptlist[:allpts//2]
     bottomedge = ptlist[allpts//2:-1][::-1]
+    flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
+        topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
+    fmesh = setFaultMeshSpacing(evconf, flen)
     faultplane = ComplexFaultSurface.from_fault_data(
             edges=[Line(topedge), Line(bottomedge)],
-            mesh_spacing=1.0)
+            mesh_spacing=fmesh)
     rctx = RuptureContext()
     rctx.strike = faultplane.get_strike()
     evconf['evmech']['strike'] = rctx.strike
@@ -337,9 +356,12 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         b_sb_geo = ops.transform(rev_project.transform, b_sbf)
         topedge = [Point(depth=rctx.ztor, latitude=pt[1], longitude=pt[0]) for pt in sb_geo.coords]
         bottomedge = [Point(depth=maxz, latitude=pt[1], longitude=pt[0]) for pt in b_sb_geo.coords]
+        flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
+            topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
+        fmesh = setFaultMeshSpacing(evconf, flen)
         faultplane = ComplexFaultSurface.from_fault_data(
             edges=[Line(topedge), Line(bottomedge)],
-            mesh_spacing=1.0)
+            mesh_spacing=fmesh)
         l_faultplane.append(faultplane)
         l_rctx.append(rctx)
     return l_rctx, l_faultplane
@@ -466,17 +488,17 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
         import matplotlib.pyplot as plt
         flat = []
         flon = []
-        if isinstance(faultplane, PlanarSurface):
-            for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, faultplane.bottom_left, faultplane.top_left]:
-                flat.append(x.latitude)
-                flon.append(x.longitude)
-        else:
+        if isinstance(faultplane, ComplexFaultSurface):
             top = faultplane.surface_nodes[0].nodes[0].nodes[0].nodes[0]
             bottom = faultplane.surface_nodes[0].nodes[-1].nodes[0].nodes[0]
             flon.extend([float(x) for x in top.to_str().split('[')[1].split(']')[0].split(',')[::3]])
             flat.extend([float(x) for x in top.to_str().split('[')[1].split(']')[0].split(',')[1::3]])
             flon.extend([float(x) for x in bottom.to_str().split('[')[1].split(']')[0].split(',')[::3]])
             flat.extend([float(x) for x in bottom.to_str().split('[')[1].split(']')[0].split(',')[1::3]])
+        else:
+            for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, faultplane.bottom_left, faultplane.top_left]:
+                flat.append(x.latitude)
+                flon.append(x.longitude)
         for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
             cb = plt.scatter(lons, lats, c=[log10(x) if x>0 else 0 for x in v])
             plt.scatter(evconf['evloc']['centroid_lon'], evconf['evloc']['centroid_lat'], marker='*', s=80)
