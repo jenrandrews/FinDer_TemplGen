@@ -37,6 +37,16 @@ import Strasser2010_Intraslab_Ext
 
 logger = logging.getLogger(__name__)
 
+def ln2log(inx):
+    '''
+    Convert PGV in ln(m/s) to log10(cm/s/s)
+    Args:
+    - Numpy array of PGV values in ln(m/s)
+    Return:
+    - Numpy array of PGV values in log10(cm/s/s)
+    '''
+    return np.log10(np.exp(inx))
+
 def lng2cm(inx):
     '''
     Convert PGA in ln(g) to log10(cm/s/s)
@@ -47,7 +57,6 @@ def lng2cm(inx):
     '''
     inx = np.log10(np.exp(inx)) + log10(980.665)
     return inx
-
 
 def getScalingRelation(conf):
     '''
@@ -537,21 +546,25 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     # --------------------------------------------------------------------------
     # Distance context
     # --------------------------------------------------------------------------
-    rjb = calcconf['pt']['rjb']
+    rjbmin = calcconf['pt']['rjblogmin']
+    rjbmax = calcconf['pt']['rjblogmax']
+    rjbnum = ((rjbmax - rjbmin)/calcconf['pt']['rjblogstep']) + 1
+    rjb = np.logspace(0., 3.5, num=71)
     dctx = DistancesContext()
-    dctx.rjb = np.full((1, 1), rjb)
+    dctx.rjb = np.insert(rjb, 0, 0.01)
+    #dctx.rjb = np.full((1, 1), rjb)
     dctx.rjb_var = None
     dctx.rrup_var = None
     dctx.rvolc = np.zeros_like(dctx.rjb) # no correction for travel path in volcanic region
-    dctx.rhypo = np.full((1, 1), np.sqrt(pow(rjb, 2) + pow(rctx.hypo_depth, 2)))
+    dctx.rhypo = np.sqrt(pow(dctx.rjb, 2) + pow(rctx.hypo_depth, 2))
     dctx.rx = dctx.rjb
     dctx.ry0 = np.zeros_like(dctx.rjb)
-    dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
+    dctx.rrup = dctx.rjb
     # --------------------------------------------------------------------------
     # Site context
     # --------------------------------------------------------------------------
     sctx = SitesContext()
-    sctx.sids = np.arange(1).reshape(1,1)
+    sctx.sids = np.arange(dctx.rjb.shape[0]).reshape(dctx.rjb.shape)
     sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['pt']['vs30']
     sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
     sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
@@ -734,7 +747,7 @@ def createRuptures(evconf, calcconf):
     return rups
 
 
-def computeGM(gmpeconf, evconf, calcconf):
+def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     '''
     Compute ground motion using openquake functionality. Use configuration files to define
     the fault plane and earthquake parameters, points at which to calculate ground motion,
@@ -771,7 +784,7 @@ def computeGM(gmpeconf, evconf, calcconf):
     # Get multigmpe from config
     # --------------------------------------------------------------------------
     mgmpe = MultiGMPE.__from_config__(gmpeconf)
-    IMT = imt.PGA() # will be in units of "g"
+#    IMT = imt.PGA() # will be in units of "g"
     gm = {}
     tset = None
     for mag in sorted(rups):
@@ -813,7 +826,10 @@ def computeGM(gmpeconf, evconf, calcconf):
             # mean value as a natural logarithm of intensity.
             if mag not in gm:
                 gm[mag] = {}
-            gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane, dctx.rjb]
+            if IMT == imt.PGA():
+                gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane, dctx.rjb]
+            else:
+                gm[mag][(centroid_lat, centroid_lon)] = [ln2log(lmean_mgmpe), faultplane, dctx.rjb]
     return gm, evconf, template_sets
 
 
