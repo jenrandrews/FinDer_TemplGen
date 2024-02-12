@@ -77,5 +77,3 @@ The setup of GMPEs uses the same concept of weighted sets as used in ShakeMap, b
 
 ## Earthquake Depth
 Configure ["evloc"]["hypo_depth"] in event.conf as the value to be used as centroid in the rupture plane. Once fault width exceeds this depth and/or the seismogenic depth, the centroid depth may be altered within the script, with a note written to log.
-
-
