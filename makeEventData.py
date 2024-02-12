@@ -71,7 +71,9 @@ if __name__ == "__main__":
         if f.find('.json') == -1:
             continue
         evconf['evmech']['geometry'] = f
-        nind = f.replace('rupture_','').replace('.json','')
+        rdir = os.sep.join(f.split(os.sep)[:-1])
+        fname = f.split(os.sep)[-1]
+        nind = fname.replace('rupture_','').replace('.json','')
         gm, evconf, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
         for mag in gm:
             for (centroid_lat, centroid_lon) in gm[mag]:
@@ -103,7 +105,7 @@ if __name__ == "__main__":
                     evconf['evloc']['centroid_lon'], 
                     mag, 
                     round(evconf['evmech']['strike']))
-            fout3 = open(oname, 'w')
+            fout3 = open(os.path.join(rdir, oname), 'w')
             fout3.write('#  {:.4f}  {:.4f}  {:.2f}  {:03d}\n'.format(evconf['evloc']['centroid_lat'], 
                     evconf['evloc']['centroid_lon'], 
                     mag, 
@@ -138,7 +140,7 @@ if __name__ == "__main__":
         if 'grid' in calcconf and calcconf['grid']['compute']:
             dkm = calcconf['grid']['griddkm']
             flen = faultplane.get_area()/faultplane.get_width()
-            oname = 'template_L%.6f_Azi0.txt' % flen
+            oname = os.path.join(rdir, f'template_L{flen:.6f}_Azi0.txt')
             if 'rupinfo' in calcconf and calcconf['rupinfo']:
                 if isinstance(faultplane, ComplexFaultSurface):
                     top = faultplane.get_top_edge_depth()
@@ -165,7 +167,7 @@ if __name__ == "__main__":
                 plt.close()
 
             if calcconf['grid']['asym']:
-                oname = 'template_L%.6f_Azi0_asym.txt' % flen
+                oname = os.path.join(rdir, f'template_L{flen:.6f}_Azi0_asym.txt')
                 hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
                 masklonind = woq.floor(lmean_mgmpe.shape[1]/2) - round(xcorr/dkm)
                 lmean_mgmpe[:,:masklonind] = -2.0
