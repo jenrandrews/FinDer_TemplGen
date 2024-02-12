@@ -87,35 +87,36 @@ if __name__ == "__main__":
             # Loop over strikes
             for strike in strikes:
                 evconf['evmech']['strike'] = strike
-                gm, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
+                gm, dummy, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
                 logging.info('Strike: %d' % strike)
                 for mag in gm:
-                    logging.info('Mag: %.2f' % mag)
-                    lmean_mgmpe, faultplane, xcorr = gm[mag]
-                    maxpga = max(lmean_mgmpe)
-                    logging.info('Max PGA: %.4f' % maxpga)
-                    if maxpga < log10(2.):
-                        continue
-                    oname = 'data_0_%.2f_%.2f_%.2f_%03d' % (epilat, epilon, mag, strike)
-                    fout = open(oname, 'w')
-                    fout.write('#  %.4f  %.4f  %.2f  %03d\n' % (epilat, epilon, mag, strike))
-                    for pga, lat, lon, stnn in zip(lmean_mgmpe, lats, lons, stnnames):
-    #                    fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
-                        fout.write('%.5f %.5f %.5f\n' % (lat, lon, pga))
-                    fout.close()
-                    # write data to file
-                    if calcconf['plots']:
-                        import matplotlib.pyplot as plt
-                        flat = []
-                        flon = []
-                        for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, 
-                                faultplane.bottom_left, faultplane.top_left]:
-                            flat.append(x.latitude)
-                            flon.append(x.longitude)
-                        plt.scatter(lons, lats, c=lmean_mgmpe)
-                        plt.plot(flon, flat)
-                        plt.scatter(epilon, epilat, marker='*', s=80)
-                        plt.colorbar()
-                        plt.savefig('%s.png' % oname)
-                        plt.close()
+                    for centroid_lat, centroid_lon in gm[mag]:
+                        logging.info('Mag: %.2f' % mag)
+                        lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
+                        maxpga = max(lmean_mgmpe)
+                        logging.info('Max PGA: %.4f' % maxpga)
+                        if maxpga < log10(2.):
+                            continue
+                        oname = 'data_0_%.2f_%.2f_%.2f_%03d' % (epilat, epilon, mag, strike)
+                        fout = open(oname, 'w')
+                        fout.write('#  %.4f  %.4f  %.2f  %03d\n' % (epilat, epilon, mag, strike))
+                        for pga, lat, lon, stnn in zip(lmean_mgmpe, lats, lons, stnnames):
+        #                    fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
+                            fout.write('%.5f %.5f %.5f\n' % (lat, lon, pga))
+                        fout.close()
+                        # write data to file
+                        if calcconf['plots']:
+                            import matplotlib.pyplot as plt
+                            flat = []
+                            flon = []
+                            for x in [faultplane.top_left, faultplane.top_right, faultplane.bottom_right, 
+                                    faultplane.bottom_left, faultplane.top_left]:
+                                flat.append(x.latitude)
+                                flon.append(x.longitude)
+                            plt.scatter(lons, lats, c=lmean_mgmpe)
+                            plt.plot(flon, flat)
+                            plt.scatter(epilon, epilat, marker='*', s=80)
+                            plt.colorbar()
+                            plt.savefig('%s.png' % oname)
+                            plt.close()
 

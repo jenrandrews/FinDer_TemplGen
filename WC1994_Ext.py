@@ -11,6 +11,24 @@ class WC1994_Ext(WC1994):
     plus magnitude-width and width-magnitude scaling relationships.
     """
 
+    def get_median_SRlength(self, mag, rake=None):
+        """
+        Calculates median fault length from magnitude.
+        Note this uses the SRL (surface) relation, not RLD (subsurface)
+        """
+        if rake is None:
+            # Their 'ALL' case
+            return pow(10., (0.69 * mag) - 3.22)
+        elif (-45 <= rake <= 45) or (rake >= 135) or (rake <= -135):
+            # strike slip
+            return pow(10., (0.74 * mag) - 3.55)
+        elif rake > 0.:
+            # thrust/reverse
+            return pow(10., (0.63 * mag) - 2.86)
+        else:
+            # normal
+            return pow(10., (0.50 * mag) - 2.01)
+
     def get_median_length(self, mag, rake=None):
         """
         Calculates median fault length from magnitude.
