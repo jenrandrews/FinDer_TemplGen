@@ -58,7 +58,8 @@ When using the fault-specific FinDer template wrapper (makeFaultSpecificFinDerTe
  * Template sets are used to group the templates for efficiency when running FinDer. Grouping is based on configuration parameters in calc.conf ["fault-specific"]["maxperset"] and ["fault-specific"]["minperset"]. The former sets the target maximum number of smallest magnitude templates in a template set, and the latter sets the target minimum number of largest magnitude templates in a set (unless the total number for that magnitude is smaller). Setting a very large "maxperset" will therefore result in a single set for all templates. 
  * The ["fault-specific"]["centroid_polygon_distance"] parameter in calc.conf is used to create the centroid polygon for the template set file, and is a radius in km. 
  * The scripts switch between geographic and cartesian coordinates to perform the walk along fault to create sub-faults in the required magnitude range. That switch requires the user to set the epsg code for the cartesian transformation using ["fault-specific"]["epsg"] in calc.conf. 
- * The additional info files such as latitude, longitude, template_info and template set, as used by FinDer v3, can be created by setting the "rupinfo" configuration option in calc.conf to True. 
+ * The additional info files such as latitude, longitude, template_info and template set, as used by FinDer v3, can be created by setting the "rupinfo" configuration option in calc.conf to True.
+ * If you wish to apply a station mask to the template, in calc.conf supply a ["points"]["points_file"] option, and supply a ["points"]["stnmaskdist"] distance (in km). This will create a mask allowing only grid points within 'stnmaskdist' of a supplied point in the 'points_file' to have a non-zero value.
 
 ## Scaling Relations
 Currently available scaling relations:
