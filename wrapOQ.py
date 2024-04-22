@@ -58,6 +58,19 @@ def lng2cm(inx):
     inx = np.log10(np.exp(inx)) + log10(980.665)
     return inx
 
+def rdPoints(calcconf):
+    lats = []
+    lons = []
+    lvs30 = []
+    # Expects a file with space separated fields: lat lon vs30 name
+    with open(calcconf['points']['points_file'], 'r') as fin:
+        for l in fin:
+            fs = l.split()
+            lons.append(float(fs[1]))
+            lats.append(float(fs[0]))
+            lvs30.append(float(fs[2]))
+    return lats, lons, lvs30
+
 def getScalingRelation(conf):
     '''
     Returns the ScalingRelation class using configuration file input.
@@ -363,8 +376,13 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             b_sbf = sbf.parallel_offset(abs(xcorr * 1000), side, join_style=2)
         sb_geo = ops.transform(rev_project.transform, sbf)
         b_sb_geo = ops.transform(rev_project.transform, b_sbf)
+        disttol = 1. # km
         topedge = [Point(depth=rctx.ztor, latitude=pt[1], longitude=pt[0]) for pt in sb_geo.coords]
         bottomedge = [Point(depth=maxz, latitude=pt[1], longitude=pt[0]) for pt in b_sb_geo.coords]
+        if topedge[0].distance(topedge[-1]) < disttol:
+            continue
+        if bottomedge[0].distance(bottomedge[-1]) < disttol:
+            continue
         flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
             topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
         fmesh = setFaultMeshSpacing(evconf, flen)
@@ -457,17 +475,7 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     if not os.path.isfile(calcconf['points']['points_file']):
         return None, None
-    # Expects a file with space separated fields: lat lon vs30 name
-    fin = open(calcconf['points']['points_file'], 'r')
-    lats = []
-    lons = []
-    lvs30 = []
-    for l in fin:
-        fs = l.split()
-        lons.append(float(fs[1]))
-        lats.append(float(fs[0]))
-        lvs30.append(float(fs[2]))
-    fin.close()
+    lats, lons, lvs30 = rdPoints(calcconf)
     mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
@@ -763,8 +771,12 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     '''
     rups = createRuptures(evconf, calcconf)
     template_sets = None
+
     if 'fault-specific' in calcconf:
         template_sets = createTemplateSets([(m, clat, clon) for m in rups for (clat, clon) in rups[m]], calcconf)
+        if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+            lats, lons, lvs30 = rdPoints(calcconf)
+            stn_mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
         if 'grid' in calcconf and calcconf['grid']['compute']:
             for i in sorted(template_sets):
                 l_mesh_lats = []
@@ -779,6 +791,9 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                         l_mesh_lons.append(bb[2])
                 bb = utils.get_spherical_bounding_box(l_mesh_lons, l_mesh_lats)
                 template_sets[i]['mesh'] = mesh_from_bb(calcconf, bb.south, bb.north, bb.west, bb.east)
+                if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+                    dists = stn_mesh.get_min_distance(template_sets[i]['mesh'])
+                    template_sets[i]['mask'] = [0 if d > calcconf['points']['stnmaskdist'] else 1 for d in dists];
 
     # --------------------------------------------------------------------------
     # Get multigmpe from config
@@ -786,7 +801,6 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     mgmpe = MultiGMPE.__from_config__(gmpeconf)
 #    IMT = imt.PGA() # will be in units of "g"
     gm = {}
-    tset = None
     for mag in sorted(rups):
         for centroid_lat, centroid_lon in sorted(rups[mag]): 
             evconf['mag'] = mag
@@ -798,8 +812,9 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                 if template_sets is not None:
                     for i in template_sets:
                         if mag in template_sets[i] and [centroid_lat, centroid_lon] in template_sets[i][mag]:
-                            tset = i
                             calcconf['mesh'] = template_sets[i]['mesh']
+                            if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+                                calcconf['mask'] = template_sets[i]['mask']
                 dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'points' in calcconf and calcconf['points']['compute']:
                 dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
@@ -809,6 +824,11 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
             # Compute ground motion
             # --------------------------------------------------------------------------
             lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
+            if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+                nr = len(set(calcconf['mesh'].lats))
+                nc = len(set(calcconf['mesh'].lons))
+                mask = np.reshape(calcconf['mask'], (nr, nc))
+                lmean_mgmpe = lmean_mgmpe * mask
             # US ShakeAlert measures largest of two horizontals (FFD2)
             # Seiscomp measures peak of real-time root or sum or squares of two horizontals
             # Most GMPEs use geometric mean measures (GM, GMRotD50 etc.) which are smaller

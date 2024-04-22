@@ -95,7 +95,7 @@ if __name__ == "__main__":
                 for lon in sorted(set(templ_sets[tset]['mesh'].lons)):
                     fout4.write(f'{lon:.6f}\n')
         minflen = maxflen = None
-        for mag in sorted([m for m in templ_sets[tset] if m != 'mesh']):
+        for mag in sorted([m for m in templ_sets[tset] if m not in ['mesh', 'mask']]):
             for (centroid_lat, centroid_lon) in sorted(templ_sets[tset][mag]):
                 lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
                 fwid = faultplane.get_width()
@@ -140,8 +140,8 @@ if __name__ == "__main__":
         if 'rupinfo' in calcconf and calcconf['rupinfo']:
             fout.close()
             fout2.close()
-            coords = [c for m in templ_sets[tset] for c in templ_sets[tset][m] if m != 'mesh']
-            mags = [m for m in templ_sets[tset] if m != 'mesh']
+            coords = [c for m in templ_sets[tset] for c in templ_sets[tset][m] if m not in ['mesh', 'mask']]
+            mags = [m for m in templ_sets[tset] if m not in ['mesh', 'mask']]
             name = f'{calcconf["fault-specific"]["name"]}_{tset:d}'
             writeSetFile(calcconf, name, minflen, maxflen, min(mags), max(mags), [(c[1], c[0]) for c in coords])
 
