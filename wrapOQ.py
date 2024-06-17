@@ -45,11 +45,11 @@ logger = logging.getLogger(__name__)
 
 def ln2log(inx):
     '''
-    Convert PGV in ln(m/s) to log10(cm/s/s)
+    Convert PGV in ln(m/s) to log10(m/s)
     Args:
     - Numpy array of PGV values in ln(m/s)
     Return:
-    - Numpy array of PGV values in log10(cm/s/s)
+    - Numpy array of PGV values in log10(m/s)
     '''
     return np.log10(np.exp(inx))
 
