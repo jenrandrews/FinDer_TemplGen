@@ -690,18 +690,18 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     dctx.rx = faultplane.get_rx_distance(mesh)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
     dctx.rrup = faultplane.get_min_distance(mesh)
-
     nr = len(set(mesh.lats))
     nc = len(set(mesh.lons))
-    dctx.rjb = np.reshape(dctx.rjb, (nr, nc))
-    dctx.rvolc = np.reshape(dctx.rvolc, (nr, nc))
-    dctx.rhypo = np.reshape(dctx.rhypo, (nr, nc))
-    dctx.rx = np.reshape(dctx.rx, (nr, nc))
-    dctx.ry0 = np.reshape(dctx.ry0, (nr, nc))
-    dctx.rrup = np.reshape(dctx.rrup, (nr, nc))
+
     if bPlots:
+        rjb = np.reshape(dctx.rjb, (nr, nc))
+        rvolc = np.reshape(dctx.rvolc, (nr, nc))
+        rhypo = np.reshape(dctx.rhypo, (nr, nc))
+        rx = np.reshape(dctx.rx, (nr, nc))
+        ry0 = np.reshape(dctx.ry0, (nr, nc))
+        rrup = np.reshape(dctx.rrup, (nr, nc))
         import matplotlib.pyplot as plt
-        for v, lbl in zip([dctx.rrup, dctx.rjb, dctx.rx, dctx.ry0, dctx.rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
+        for v, lbl in zip([rrup, rjb, rx, ry0, rhypo], ['rrup', 'rjb', 'rx', 'ry0', 'rhypo']):
             cb = plt.imshow(v, origin='lower')
             plt.colorbar(cb)
             plt.savefig('%s_M%.1f.png' % (lbl, evconf['mag']))
@@ -710,15 +710,15 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     # Site context
     # --------------------------------------------------------------------------
     sctx = SitesContext()
-    sctx.sids = np.arange(nc*nr).reshape(dctx.rjb.shape)
-    #sctx.sids = np.arange(len(dctx.rjb))
+    #sctx.sids = np.arange(nc*nr).reshape(dctx.rjb.shape)
+    sctx.sids = np.arange(len(dctx.rjb))
     sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['grid']['vs30']
     sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
     sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
     sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
     sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
     sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
-    return dctx, sctx
+    return dctx, sctx, nr, nc
 
 
 def createRuptures(evconf, calcconf):
@@ -821,7 +821,7 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                             calcconf['mesh'] = template_sets[i]['mesh']
                             if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
                                 calcconf['mask'] = template_sets[i]['mask']
-                dctx, sctx = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+                dctx, sctx, nr, nc = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'points' in calcconf and calcconf['points']['compute']:
                 dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'pt' in calcconf and calcconf['pt']['compute']:
@@ -830,6 +830,8 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
             # Compute ground motion
             # --------------------------------------------------------------------------
             lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
+            if 'grid' in calcconf and calcconf['grid']['compute']:
+                lmean_mgmpe = np.reshape(lmean_mgmpe, (nr, nc))
             if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
                 nr = len(set(calcconf['mesh'].lats))
                 nc = len(set(calcconf['mesh'].lons))
