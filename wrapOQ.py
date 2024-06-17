@@ -22,10 +22,16 @@ from openquake.hazardlib.geo import utils
 from openquake.hazardlib.geo.surface import PlanarSurface, SimpleFaultSurface, ComplexFaultSurface
 
 # shakemap imports
-from shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
-from shakelib.multigmpe import MultiGMPE, set_sites_depth_parameters
-import shakelib.sites as sites
-from shakelib.sites import Sites
+try:
+    from esi_shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
+    from esi_shakelib.multigmpe import MultiGMPE, set_sites_depth_parameters
+    import esi_shakelib.sites as sites
+    from esi_shakelib.sites import Sites
+except:
+    from shakelib.conversions.imc.boore_kishida_2017 import BooreKishida2017
+    from shakelib.multigmpe import MultiGMPE, set_sites_depth_parameters
+    import shakelib.sites as sites
+    from shakelib.sites import Sites
 
 # local imports
 import Leonard2014_Interplate_Ext

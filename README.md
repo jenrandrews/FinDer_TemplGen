@@ -11,12 +11,18 @@ These are simple scripts to create template input files for FinDer. Information 
 The template generation script is built on top of ShakeMap, which in turn uses OpenQuake. Documentation for ShakeMap can be found here:
  * https://usgs.github.io/shakemap/index.html 
  * https://github.com/usgs/shakemap/wiki
- 
+
+For ShakeMap versions 4.2 and greater, the easiest approach is to create a conda environment and
+install esi-shakelib:
+ * https://pypi.org/project/esi-shakelib/
+2024/06/17: create a python 3.9 environment and pip install esi-shakelib.
+
 # Usage
 
-The easiest way to run the script is to leverage the shakemap environment:
+The easiest way to run the script is to leverage your shakelib (if you did a pip install into
+a conda environment) or shakemap environment:
 ```
-conda run -n shakemap python makeFinDerTemplates.py -e event.conf -g gmpe.conf -c calc.conf
+conda run -n <your shake env> python makeFinDerTemplates.py -e event.conf -g gmpe.conf -c calc.conf
 ```
 Example configuration files are provided and should be edited before running the script. 
 
