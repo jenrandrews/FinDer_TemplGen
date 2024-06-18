@@ -56,7 +56,7 @@ if __name__ == "__main__":
     import logging.config
     from DEFLOG import DEFLOG
     DEFLOG['handlers']['fileHandler']['filename'] = \
-            'makeFinDerTemplates_%s.log' % time.strftime('%y%m%dT%H%M%S', time.gmtime(time.time()))
+            'makeFaultSpecificFinDerTemplates_%s.log' % time.strftime('%y%m%dT%H%M%S', time.gmtime(time.time()))
     logging.config.dictConfig(DEFLOG)
     logger = logging.getLogger(__name__)
 
@@ -75,6 +75,10 @@ if __name__ == "__main__":
     gmpeconf = woq.importConfig(args.gmpeconf)
     evconf = woq.importConfig(args.evconf)
     calcconf = woq.importConfig(args.calcconf)
+
+    if not os.path.isfile(evconf['evmech']['geometry']):
+        logging.fatal(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
+        exit()
 
     gm, dummy, templ_sets = woq.computeGM(gmpeconf, evconf, calcconf)
     for tset in sorted(templ_sets):

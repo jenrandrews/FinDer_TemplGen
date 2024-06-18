@@ -33,7 +33,7 @@ if __name__ == "__main__":
     import logging.config
     from DEFLOG import DEFLOG
     DEFLOG['handlers']['fileHandler']['filename'] = \
-            'makeFinDerTemplates_%s.log' % time.strftime('%y%m%dT%H%M%S', time.gmtime(time.time()))
+            'makeEventData_%s.log' % time.strftime('%y%m%dT%H%M%S', time.gmtime(time.time()))
     logging.config.dictConfig(DEFLOG)
 
     # --------------------------------------------------------------------------

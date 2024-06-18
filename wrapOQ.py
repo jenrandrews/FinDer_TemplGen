@@ -45,11 +45,11 @@ logger = logging.getLogger(__name__)
 
 def ln2log(inx):
     '''
-    Convert PGV in ln(m/s) to log10(cm/s/s)
+    Convert PGV in ln(m/s) to log10(m/s)
     Args:
     - Numpy array of PGV values in ln(m/s)
     Return:
-    - Numpy array of PGV values in log10(cm/s/s)
+    - Numpy array of PGV values in log10(m/s)
     '''
     return np.log10(np.exp(inx))
 
@@ -65,6 +65,9 @@ def lng2cm(inx):
     return inx
 
 def rdPoints(calcconf):
+    if not os.path.isfile(calcconf['points']['points_file']):
+        logging.warn(f'Specified points file {calcconf["points"]["points_file"]} is not found')
+        return None, None, None
     lats = []
     lons = []
     lvs30 = []
@@ -157,6 +160,9 @@ def importRuptureContext(evconf):
     - faultplane: ComplexFaultSurface for rupture
     '''
     from json import JSONDecoder
+    if not os.path.isfile(evconf['evmech']['geometry']):
+        logging.warn(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
+        return None, None, None
     with open(evconf['evmech']['geometry'], 'r') as fin:
         rup = JSONDecoder().decode(fin.read())
     evconf['mag'] = rup['metadata']['mag']
@@ -299,6 +305,10 @@ def createSubFaultRuptureContexts(evconf, calcconf):
     Return:
     - lists, RuptureContexts and faultplanes
     '''
+    if not os.path.isfile(evconf['evmech']['geometry']):
+        logging.warn(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
+        return None, None
+
     import shapely as shp
     import shapely.ops as ops
     import pyproj
@@ -330,8 +340,11 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         fwid = flen
     farea = scalrel.get_median_area(evconf['mag'], evconf['evmech']['rake'])
     logger.info(f'Fault dimensions: {farea}, {flen}, {fwid}, {flen*fwid}, {flen/fwid}')
-    diprad = radians(evconf['evmech']['dip'])
-    xcorr = cos(diprad) * fwid
+    xcorr = 0.
+    if evconf['evmech']['dip'] != 90.:
+        xcorr = cos(radians(evconf['evmech']['dip'])) * fwid
+    if xcorr < 1e-3: # Ignore corrections smaller than 1m
+        xcorr = 0.
 
     # Set the iteration for multiple overlapping fault patches
     # Overlap is 10% or 20 km
@@ -734,7 +747,7 @@ def createRuptures(evconf, calcconf):
     # --------------------------------------------------------------------------
     if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
             and evconf['evmech']['geometry'].split('.')[-1] == 'json':
-        logger.info('Computing for fault geometry, so ensure no magnitude loop')
+        logger.info('Computing for single 3D fault geometry, so ensure no magnitude loop')
         calcconf['magrange']['magmax'] = calcconf['magrange']['magmin']
     rups = {}
     for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
@@ -777,12 +790,14 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     '''
     rups = createRuptures(evconf, calcconf)
     template_sets = None
+    stn_mesh = None
 
     if 'fault-specific' in calcconf:
         template_sets = createTemplateSets([(m, clat, clon) for m in rups for (clat, clon) in rups[m]], calcconf)
         if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
             lats, lons, lvs30 = rdPoints(calcconf)
-            stn_mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
+            if lats is not None:
+                stn_mesh = Mesh(lons=np.asarray(lons), lats=np.asarray(lats), depths=np.zeros_like(np.asarray(lons)))
         if 'grid' in calcconf and calcconf['grid']['compute']:
             for i in sorted(template_sets):
                 l_mesh_lats = []
@@ -797,7 +812,7 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                         l_mesh_lons.append(bb[2])
                 bb = utils.get_spherical_bounding_box(l_mesh_lons, l_mesh_lats)
                 template_sets[i]['mesh'] = mesh_from_bb(calcconf, bb.south, bb.north, bb.west, bb.east)
-                if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+                if stn_mesh is not None:
                     dists = stn_mesh.get_min_distance(template_sets[i]['mesh'])
                     template_sets[i]['mask'] = [0 if d > calcconf['points']['stnmaskdist'] else 1 for d in dists];
 
@@ -819,7 +834,7 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                     for i in template_sets:
                         if mag in template_sets[i] and [centroid_lat, centroid_lon] in template_sets[i][mag]:
                             calcconf['mesh'] = template_sets[i]['mesh']
-                            if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
+                            if stn_mesh is not None:
                                 calcconf['mask'] = template_sets[i]['mask']
                 dctx, sctx, nr, nc = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'points' in calcconf and calcconf['points']['compute']:
@@ -832,11 +847,6 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
             lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
             if 'grid' in calcconf and calcconf['grid']['compute']:
                 lmean_mgmpe = np.reshape(lmean_mgmpe, (nr, nc))
-            if 'points' in calcconf and 'stnmaskdist' in calcconf['points'] and calcconf['points']['stnmaskdist'] > 0.:
-                nr = len(set(calcconf['mesh'].lats))
-                nc = len(set(calcconf['mesh'].lons))
-                mask = np.reshape(calcconf['mask'], (nr, nc))
-                lmean_mgmpe = lmean_mgmpe * mask
             # US ShakeAlert measures largest of two horizontals (FFD2)
             # Seiscomp measures peak of real-time root or sum or squares of two horizontals
             # Most GMPEs use geometric mean measures (GM, GMRotD50 etc.) which are smaller
@@ -855,11 +865,26 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
             if mag not in gm:
                 gm[mag] = {}
             if IMT == imt.PGA():
-                gm[mag][(centroid_lat, centroid_lon)] = [lng2cm(lmean_mgmpe), faultplane, dctx.rjb]
+                ogrid = lng2cm(lmean_mgmpe)
             else:
-                gm[mag][(centroid_lat, centroid_lon)] = [ln2log(lmean_mgmpe), faultplane, dctx.rjb]
+                ogrid = ln2log(lmean_mgmpe)
+            if stn_mesh is not None:
+                ogrid = apply_mask(ogrid, calcconf, -4.)
+            gm[mag][(centroid_lat, centroid_lon)] = [ogrid, faultplane, dctx.rjb]
     return gm, evconf, template_sets
 
+def apply_mask(ingrid, calcconf, maskedval):
+    '''
+    Multiply an ingrid by a mask grid
+    Args:
+    - ingrid: input grid, likely template
+    - calcconf: calculation configuration
+    - maskedval: set all masked area to this value
+    '''
+    mask = np.reshape(calcconf['mask'], (len(set(calcconf['mesh'].lats)), len(set(calcconf['mesh'].lons))))
+    ogrid = ingrid * mask
+    ogrid[ogrid == 0] = maskedval
+    return ogrid
 
 def createTemplateSets(data, calcconf):
     '''
