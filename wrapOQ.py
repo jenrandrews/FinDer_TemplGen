@@ -748,7 +748,10 @@ def createRuptures(evconf, calcconf):
     if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
             and evconf['evmech']['geometry'].split('.')[-1] == 'json':
         logger.info('Computing for single 3D fault geometry, so ensure no magnitude loop')
-        calcconf['magrange']['magmax'] = calcconf['magrange']['magmin']
+        if 'magrange' not in calcconf:
+            calcconf['magrange'] = {}
+        calcconf['magrange']['magstep'] = 10.
+        calcconf['magrange']['magmax'] = calcconf['magrange']['magmin'] = 0.
     rups = {}
     for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
             calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep']):

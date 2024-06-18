@@ -110,8 +110,7 @@ if __name__ == "__main__":
                     evconf['evloc']['centroid_lon'], 
                     mag, 
                     round(evconf['evmech']['strike'])))
-            for pga, lat, lon, stnn, dist in zip(lmean_mgmpe, lats, lons, stnnames, rjb):
-                #fout.write('%.5f %.5f %s %.5f\n' % (lat, lon, stnn, pga))
+            for pga, lat, lon, stnn, dist in zip(lmean_mgmpe.tolist()[0], lats, lons, stnnames, rjb):
                 #fout.write('{:.5f} {:.5f} {:.5f}\n'.format(lat, lon, pga))
                 fout3.write('{:.5f} {:.5f} {:.5f} {:.2f}\n'.format(lat, lon, pga, dist))
             fout3.close()
