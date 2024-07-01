@@ -372,27 +372,30 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         start_dist = sind * dist_step 
         end_dist = start_dist + (flen * 1000.)
         sbf = ops.substring(fault_cart, start_dist, end_dist)
-        dx = sbf.coords[-1][0] - sbf.coords[0][0]
-        dy = sbf.coords[-1][1] - sbf.coords[0][1]
-        theta = degrees(atan(dx/dy))
-        if sbf.coords[0][1] > sbf.coords[-1][1]:
-            approx_strike = 180. + theta
-        elif sbf.coords[0][0] > sbf.coords[-1][0]:
-            approx_strike = 360. + theta
+        if rctx.dip == 90.:
+            b_sbf = sbf
         else:
-            approx_strike = theta
-        # Start each with positive
-        xcorr = abs(xcorr)
-        side = 'left'
-        delta_strike = abs(approx_strike - evconf['evmech']['strike'])
-        delta_strike = delta_strike if delta_strike < 180. else 360. - delta_strike 
-        if delta_strike < 90. and xcorr > 0.:
-            xcorr *= -1.
-            side = 'right'
-        if int(shp.__version__.split('.')[0]) >= 2:
-            b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
-        else:
-            b_sbf = sbf.parallel_offset(abs(xcorr * 1000), side, join_style=2)
+            dx = sbf.coords[-1][0] - sbf.coords[0][0]
+            dy = sbf.coords[-1][1] - sbf.coords[0][1]
+            theta = degrees(atan(dx/dy))
+            if sbf.coords[0][1] > sbf.coords[-1][1]:
+                approx_strike = 180. + theta
+            elif sbf.coords[0][0] > sbf.coords[-1][0]:
+                approx_strike = 360. + theta
+            else:
+                approx_strike = theta
+            # Start each with positive
+            xcorr = abs(xcorr)
+            side = 'left'
+            delta_strike = abs(approx_strike - evconf['evmech']['strike'])
+            delta_strike = delta_strike if delta_strike < 180. else 360. - delta_strike 
+            if delta_strike < 90. and xcorr > 0.:
+                xcorr *= -1.
+                side = 'right'
+            if int(shp.__version__.split('.')[0]) >= 2:
+                b_sbf = sbf.offset_curve(xcorr * 1000., join_style=2)
+            else:
+                b_sbf = sbf.parallel_offset(abs(xcorr * 1000), side, join_style=2)
         sb_geo = ops.transform(rev_project.transform, sbf)
         b_sb_geo = ops.transform(rev_project.transform, b_sbf)
         disttol = 1. # km
