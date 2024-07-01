@@ -405,9 +405,9 @@ def createSubFaultRuptureContexts(evconf, calcconf):
             continue
         if bottomedge[0].distance(bottomedge[-1]) < disttol:
             continue
-        flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
+        flen_tmp = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
             topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
-        fmesh = setFaultMeshSpacing(evconf, flen)
+        fmesh = setFaultMeshSpacing(evconf, flen_tmp)
         faultplane = ComplexFaultSurface.from_fault_data(
             edges=[Line(topedge), Line(bottomedge)],
             mesh_spacing=fmesh)
