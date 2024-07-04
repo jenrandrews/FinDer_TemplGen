@@ -40,6 +40,7 @@ import Blaser_2010
 import Skarlatoudis_2016
 import Strasser2010_Interface_Ext
 import Strasser2010_Intraslab_Ext
+import NZNSHMcrustal_2022
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,8 @@ def getScalingRelation(conf):
         return Blaser_2010.Blaser2010_Interface()
     elif conf['scaling_relation']['scalrel'] == 'Skarlatoudis2016':
         return Skarlatoudis_2016.Skarlatoudis_2016()
+    elif conf['scaling_relation']['scalrel'] == 'NZNSHMcrustal_2022':
+        return NZNSHMcrustal_2022.NZNSHMcrustal_2022()
     else:
         return Leonard2014_Interplate_Ext.Leonard2014_Interplate_Ext()
 
