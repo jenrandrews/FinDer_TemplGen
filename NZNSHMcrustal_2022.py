@@ -42,7 +42,7 @@ class NZNSHMcrustal_2022():
         """
         Calculates median fault length from magnitude.
         """
-        return sqrt(self.get_median_area(mag) * faultAR(mag))
+        return sqrt(self.get_median_area(mag) * self.faultAR(mag))
 
 
     def get_median_mag_from_length(self, flen, rake=None):
@@ -56,7 +56,7 @@ class NZNSHMcrustal_2022():
         """
         Calculates median fault width from magnitude.
         """
-        return sqrt(self.get_median_area(mag) / faultAR(mag))
+        return sqrt(self.get_median_area(mag) / self.faultAR(mag))
 
 
     def get_median_mag_from_width(self, fwid, rake=None):
