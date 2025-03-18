@@ -147,5 +147,5 @@ class Blaser2010_Interface():
         Calculates median fault area from magnitude.
         """
         length = self.get_median_length(mag, rake, setting)
-        width = self.get_median_length(mag, rake, setting)
+        width = self.get_median_width(mag, rake, setting)
         return length * width

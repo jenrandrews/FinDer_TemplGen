@@ -13,6 +13,7 @@ class Skarlatoudis2016_Interface():
     def get_median_area(self, mag, rake=None):
         """
         Calculates median fault area from magnitude.
+        These are from Table 4, non-self-similar!!
         """
         # log(area) = log(ca) + cb * M0(in Nm)
         # log(area) = log(ca) + cb * (1.5Mw + 9.05)
