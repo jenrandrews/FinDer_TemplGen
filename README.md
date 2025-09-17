@@ -17,6 +17,8 @@ install esi-shakelib:
  * https://pypi.org/project/esi-shakelib/
 
 2024/06/17: create a python 3.9 environment and pip install esi-shakelib.
+2025/09/17: cannot currently work with the latest esi-shakelib, so environment.yml added to repo to
+work with esi-shakelib version 1.0.8 (conda env create --file environment.yml)
 
 # Usage
 
