@@ -3,7 +3,8 @@
 import time as time
 import argparse
 import wrapOQ as woq
-
+import numpy as np
+from math import cos, radians
 
 def formatHeader(oname):
     '''
@@ -81,6 +82,12 @@ if __name__ == "__main__":
             if calcconf['grid']['asym']:
                 oname = 'template_L%.6f_Azi0_asym.txt' % flen
                 hstr = '%d %d\n%f %d %.1f\n' % (lmean_mgmpe.shape[1], lmean_mgmpe.shape[0], flen, 0, dkm)
+                xcorr = 0.
+                if evconf['evmech']['dip'] != 90.:
+                    xcorr = cos(radians(evconf['evmech']['dip'])) * faultplane.get_width()
+                if xcorr < 1e-3: # Ignore corrections smaller than 1m
+                    xcorr = 0.
+                xcorr = abs(xcorr)
                 masklonind = woq.floor(lmean_mgmpe.shape[1]/2) - round(xcorr/dkm)
                 lmean_mgmpe[:,:masklonind] = -2.0
                 woq.np.savetxt(oname, lmean_mgmpe, fmt='%.6e', header=hstr)
