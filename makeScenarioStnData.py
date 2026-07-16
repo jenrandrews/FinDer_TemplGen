@@ -87,12 +87,15 @@ if __name__ == "__main__":
             # Loop over strikes
             for strike in strikes:
                 evconf['evmech']['strike'] = strike
-                gm, dummy, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
+                gm, _, _ = woq.computeGM(gmpeconf, evconf, calcconf)
+                if gm is None:
+                    logging.fatal('computeGM failed')
+                    exit()
                 logging.info('Strike: %d' % strike)
                 for mag in gm:
                     for centroid_lat, centroid_lon in gm[mag]:
                         logging.info('Mag: %.2f' % mag)
-                        lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
+                        lmean_mgmpe, faultplane, rjb, _, _ = gm[mag][(centroid_lat, centroid_lon)]
                         maxpga = max(lmean_mgmpe)
                         logging.info('Max PGA: %.4f' % maxpga)
                         if maxpga < log10(2.):

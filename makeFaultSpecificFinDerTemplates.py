@@ -80,7 +80,10 @@ if __name__ == "__main__":
         logging.fatal(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
         exit()
 
-    gm, dummy, templ_sets = woq.computeGM(gmpeconf, evconf, calcconf)
+    gm, _, templ_sets = woq.computeGM(gmpeconf, evconf, calcconf)
+    if gm is None:
+        logging.fatal('computeGM failed')
+        exit()
     for tset in sorted(templ_sets):
         odir = '_'.join(['Templates', 'PGA', calcconf['fault-specific']['name'], str(tset)])
         if not os.path.isdir(odir):
@@ -101,7 +104,7 @@ if __name__ == "__main__":
         minflen = maxflen = None
         for mag in sorted([m for m in templ_sets[tset] if m not in ['mesh', 'mask']]):
             for (centroid_lat, centroid_lon) in sorted(templ_sets[tset][mag]):
-                lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
+                lmean_mgmpe, faultplane, rjb, _, _ = gm[mag][(centroid_lat, centroid_lon)]
                 fwid = faultplane.get_width()
                 flen = faultplane.get_area()/fwid
                 if minflen is None or flen < minflen:

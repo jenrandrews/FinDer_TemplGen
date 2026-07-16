@@ -74,11 +74,13 @@ if __name__ == "__main__":
         rdir = os.sep.join(f.split(os.sep)[:-1])
         fname = f.split(os.sep)[-1]
         nind = fname.replace('rupture_','').replace('.json','')
-        gm, evconf, dummy = woq.computeGM(gmpeconf, evconf, calcconf)
+        gm, evconf, _ = woq.computeGM(gmpeconf, evconf, calcconf)
+        if gm is None:
+            logging.fatal('computeGM failed')
+            exit()
         for mag in gm:
             for (centroid_lat, centroid_lon) in gm[mag]:
-#                lmean_mgmpe, faultplane = gm[mag][(centroid_lat, centroid_lon)]
-                lmean_mgmpe, faultplane, rjb = gm[mag][(centroid_lat, centroid_lon)]
+                lmean_mgmpe, faultplane, rjb, _, _ = gm[mag][(centroid_lat, centroid_lon)]
         maxpga = np.amax(lmean_mgmpe)
         logging.info('Max PGA: %.4f' % maxpga)
         if maxpga < log10(2.):

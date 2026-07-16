@@ -783,7 +783,7 @@ def createRuptures(evconf, calcconf):
     return rups
 
 
-def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
+def computeGM(gmpeconf, evconf, calcconf):
     '''
     Compute ground motion using openquake functionality. Use configuration files to define
     the fault plane and earthquake parameters, points at which to calculate ground motion,
@@ -800,6 +800,17 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     rups = createRuptures(evconf, calcconf)
     template_sets = None
     stn_mesh = None
+    if 'gmtype' in calcconf:
+        if calcconf['gmtype'].lower() == 'pga':
+            IMT = imt.PGA()
+        elif calcconf['gmtype'].lower() == 'pgv':
+            IMT = imt.PGV()
+        else:
+            logger.warning(f'ground motion type {calcconf["gmtype"]} not supported')
+            return None, None, None
+    else:
+        logger.warning('defaulting ground motion type to PGA')
+        IMT = imt.PGA()
 
     if 'fault-specific' in calcconf:
         template_sets = createTemplateSets([(m, clat, clon) for m in rups for (clat, clon) in rups[m]], calcconf)
@@ -829,7 +840,6 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
     # Get multigmpe from config
     # --------------------------------------------------------------------------
     mgmpe = MultiGMPE.__from_config__(gmpeconf)
-#    IMT = imt.PGA() # will be in units of "g"
     gm = {}
     for mag in sorted(rups):
         for centroid_lat, centroid_lon in sorted(rups[mag]): 
@@ -856,6 +866,7 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
             lmean_mgmpe, lmean_sd = mgmpe.get_mean_and_stddevs(sctx, rctx, dctx, IMT, [const.StdDev.TOTAL])
             if 'grid' in calcconf and calcconf['grid']['compute']:
                 lmean_mgmpe = np.reshape(lmean_mgmpe, (nr, nc))
+                lmean_sd = np.reshape(lmean_sd, (nr, nc))
             # US ShakeAlert measures largest of two horizontals (FFD2)
             # Seiscomp measures peak of real-time root or sum or squares of two horizontals
             # Most GMPEs use geometric mean measures (GM, GMRotD50 etc.) which are smaller
@@ -875,11 +886,17 @@ def computeGM(gmpeconf, evconf, calcconf, IMT = imt.PGA()):
                 gm[mag] = {}
             if IMT == imt.PGA():
                 ogrid = lng2cm(lmean_mgmpe)
+                ogrid_psd = lng2cm(lmean_mgmpe + lmean_sd)
+                ogrid_msd = lng2cm(lmean_mgmpe - lmean_sd)
             else:
                 ogrid = ln2log(lmean_mgmpe)
+                ogrid_psd = ln2log(lmean_mgmpe + lmean_sd)
+                ogrid_msd = ln2log(lmean_mgmpe - lmean_sd)
             if stn_mesh is not None:
                 ogrid = apply_mask(ogrid, calcconf, -4.)
-            gm[mag][(centroid_lat, centroid_lon)] = [ogrid, faultplane, dctx.rjb]
+                ogrid_psd = apply_mask(ogrid_psd, calcconf, -4.)
+                ogrid_msd = apply_mask(ogrid_msd, calcconf, -4.)
+            gm[mag][(centroid_lat, centroid_lon)] = [ogrid, faultplane, dctx.rjb, ogrid_psd, ogrid_msd]
     return gm, evconf, template_sets
 
 def apply_mask(ingrid, calcconf, maskedval):
