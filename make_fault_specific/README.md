@@ -3,7 +3,8 @@
 This is an initial check-in of ungeneralised scripts to create bespoke fault-specific templates for
 New Zealand. 
 
-## Create rupture files: in = surface; out = rupture xml files:
+## Create rupture files: in = surface; out = rupture xml files
+### extract_fault_3d.py
 1. Read NZ CMF surface file
 2. Read 3D geometry as a shapely MultiPoint, convert to cartesian (NZTM) from lat/lon
 3. Clip the area to remove some weird edge effects by creating a convex hull and trimming by a small factor
@@ -25,6 +26,7 @@ New Zealand.
       6. Create an openquake complexFaultRupture xml file and specify: magnitude, rake, hypocentre (centroid), and all contours on the rupture from our contour set (at 0.5 km downdip spacing). These are specified as faultTopEdge, a set of intermediateEdge and a faultBottomEdge.
 
 ## Create computation point files (i.e. template mesh files): in = rupture xml files; out = template sets files, mesh files
+### create_tset_site_meshes.py and create_site_meshes.py
 1. Find the min/max lat/lon extents of each of the rupture files, applying a 200 km buffer around the rupture (I suspect I use 200 km because of the scale of NZ).
 2. Template set sizes range from 4 * 4 degrees to max size from (1) + 2 degrees, with 2 degree steps. Walk through the sizes starting smallest.
   a. Walk through lat range and the lon range, step size of 2 degrees.
@@ -33,13 +35,16 @@ New Zealand.
   d. Create the mesh using the min/max lat/lon and desired resolution, e.g. 5 km.
 
 ## Create OpenQuake .ini files: in = template set and mesh; out = sites and .ini files for openquake
+### generate_inis.py
 1. For each template set, create a sites file from the mesh, which is a csv file with the lat/lon points and vs30
 2. Create the .ini file for a scenario calculation in OpenQuake. The rupture mesh spacing is specified here: 2 km, and xml rupture file given. The logic tree is specified and can be set as using an average and mean ground motion. Set intensity measure type.
 
 ## Run OpenQuake: in = input openquake files; out = openquake output computation files
+### run_oq_segmented.sh
 1. Run the oq engine with the ini files created.
 
 ## Create FinDer input files: in = openquake files; out = FinDer files
+### out2templ.py
 1. Convert the OQ output to FinDer configuration files.
 2. Create additional files, e.g. create the centroid polygon
 
