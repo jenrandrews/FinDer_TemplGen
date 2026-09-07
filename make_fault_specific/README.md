@@ -5,7 +5,7 @@ New Zealand.
 
 ## Create rupture files: in = surface; out = rupture xml files
 ### extract_fault_3d.py
-1. Read NZ CMF surface file
+1. Read NZ Community Fault Model surface file
 2. Read 3D geometry as a shapely MultiPoint, convert to cartesian (NZTM) from lat/lon
 3. Clip the area to remove some weird edge effects by creating a convex hull and trimming by a small factor
 4. Use tricontour to contour the surface into depth contours at 0.5 km intervals between 6km and 80 km depth. Save each contour as a shapely LineString
