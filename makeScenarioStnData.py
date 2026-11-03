@@ -1,13 +1,15 @@
 #!/usr/bin/env python
 
 import sys
-sys.path.append('/home/jena/RCET-FinDer/scripts')
 import time as time
 import argparse
 import numpy as np
+import shapely as shp
 from math import log10
+import cartopy
+from shapely.prepared import prep
+from shapely.geometry import Point
 
-import calcdist
 import wrapOQ as woq
 
 
@@ -30,9 +32,9 @@ if __name__ == "__main__":
         dest='calcconf', help='Calculation configuration file')
     args = parser.parse_args()
 
-    gmpeconf = woq.importConfig(args.gmpeconf)
-    evconf = woq.importConfig(args.evconf)
-    calcconf = woq.importConfig(args.calcconf)
+    gmpeconf = woq.rdConfig(args.gmpeconf)
+    evconf = woq.rdConfig(args.evconf)
+    calcconf = woq.rdConfig(args.calcconf)
 
     inStrikes = np.arange(0., 180., 15.).tolist()
     outStrikes = np.arange(0., 50., 15.).tolist()
@@ -46,16 +48,20 @@ if __name__ == "__main__":
     dDeg = 0.5
     glats = []
     glons = []
-    polys = {}
-    polys['lat'] = [x[0] for x in NZ_BB]
-    polys['lon'] = [x[1] for x in NZ_BB]
+    poly = shp.Polygon([(x[1], x[0]) for x in NZ_BB])
     for lat in np.arange(NZbounds[0], NZbounds[1], dDeg):
         for lon in np.arange(NZbounds[2], NZbounds[3], dDeg):
-            if calcdist.inRegion(polys, lon, lat):
+            if poly.contains(shp.Point(lon, lat)):
                 glats.append(lat)
                 glons.append(lon)
-    inNZ, outNZ, boolNZ = calcdist.inNZ(glats, glons)
-   
+    land10m = cartopy.feature.NaturalEarthFeature('physical', 'land', '10m')
+    extents = (NZbounds[2], NZbounds[3], NZbounds[0], NZbounds[1])
+    land_polygons_raw = list(land10m.intersecting_geometries(extents))
+    land_polygons = [prep(x) for x in land_polygons_raw]
+    inNZ = [(x,y) for x,y in zip(glons, glats) if any([lp.contains(Point(x,y)) for lp in land_polygons])]
+    boolNZ = [True if any([lp.contains(Point(x,y)) for lp in land_polygons]) else False for x,y in zip(glons, glats)]
+    outNZ = [(x,y) for x,y,inpoly in zip(glons, glats, boolNZ) if not inpoly]
+
     ### JADEBUG
     #import matplotlib.pyplot as plt
     #plt.scatter([x[0] for x in outNZ], [x[1] for x in outNZ])

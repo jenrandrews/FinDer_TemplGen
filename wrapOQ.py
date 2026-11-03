@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 
-#############
-# N.B. This script is based heavily on shakemap_src/tests/shakelib/multigmpe_test.py
-#############
-
 # stdlib imports
 import copy
 import os
 import sys
 import logging
-from math import log10, sqrt, exp, floor, sin, cos, tan, radians, ceil, atan, degrees
+from math import log10, sqrt, exp, floor, sin, cos, tan, radians, ceil, atan, degrees, prod
 import numpy as np
 
 # openquake imports
@@ -44,28 +40,36 @@ import NZNSHMcrustal_2022
 
 logger = logging.getLogger(__name__)
 
-def ln2log(inx):
-    '''
-    Convert PGV in ln(m/s) to log10(m/s)
-    Args:
-    - Numpy array of PGV values in ln(m/s)
-    Return:
-    - Numpy array of PGV values in log10(m/s)
-    '''
-    return np.log10(np.exp(inx))
+# --------------------------------------------------------------------------
+# File Read Functions
+# --------------------------------------------------------------------------
 
-def lng2cm(inx):
+def rdConfig(fname):
     '''
-    Convert PGA in ln(g) to log10(cm/s/s)
+    Reads a configuration file into a python dictionary.
+    Configuration file format expected (json) so that 'eval' works.
+    Lines beginning with # are ignored.
     Args:
-    - Numpy array of PGA values in ln(g)
+    - fname: filename
     Return:
-    - Numpy array of PGA values in log10(cm/s/s)
+    - Dictionary with contents of configuration file
     '''
-    inx = np.log10(np.exp(inx)) + log10(980.665)
-    return inx
+    fin = open(fname, 'r')
+    text = fin.read()
+    ntext = ''
+    fin.close()
+    for l in text.split('\n'):
+        l = l.rstrip().lstrip()
+        if l.startswith('#'):
+            continue
+        ntext += l
+    ddict = eval(ntext)
+    return ddict
 
 def rdPoints(calcconf):
+    '''
+    Read points file
+    '''
     if not os.path.isfile(calcconf['points']['points_file']):
         logging.warn(f'Specified points file {calcconf["points"]["points_file"]} is not found')
         return None, None, None
@@ -81,10 +85,65 @@ def rdPoints(calcconf):
             lvs30.append(float(fs[2]))
     return lats, lons, lvs30
 
+# --------------------------------------------------------------------------
+# Sites Context
+# --------------------------------------------------------------------------
+
+def createSiteContext(shape, vs30):
+    '''
+    Args:
+    - shape: shape of the sites array
+    - vs30: float or array of shape
+    Return:
+    - sctx: SitesContext for the list of points
+    '''
+    sctx = SitesContext()
+    sctx.sids = np.arange(prod(shape)).reshape(shape)
+    # Vs30 single value
+    if isinstance(vs30, float):
+        sctx.vs30 = np.ones(shape) * vs30
+    else:
+        if isinstance(vs30, list):
+            vs30 = np.array(vs30)
+        if vs30.shape != shape:
+            logging.fatal('sites shape and vs30 array are different sizes')
+            return None
+        sctx.vs30 = vs30
+    sctx.vs30measured = np.full(shape, False, dtype="bool")
+    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
+    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
+    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
+    sctx.backarc = np.zeros(shape, dtype=np.int16) # forearc/backarc is unknown
+    return sctx
+
+# --------------------------------------------------------------------------
+# Rupture Context
+# --------------------------------------------------------------------------
+
+def setFaultMeshSpacing(evconf, flen):
+    '''
+    Set the fault mesh spacing based on configuration parameter, or fault
+    length if parameter not set, or too large.
+    Args:
+    - evconf: event configuration
+    - flen: fault length computed from fault description
+    Return:
+    - fmesh: fault mesh spacing
+    '''
+    if 'fault_mesh_spacing' in evconf['evmech']:
+        fmesh = evconf['evmech']['fault_mesh_spacing']
+    else:
+        fmesh = 1.
+    logging.info(f'Fault mesh spacing set to: {fmesh} km')
+    if flen/fmesh < 3.:
+        fmesh = flen/3.
+        logging.warn(f'Resetting fault mesh spacing to finer value: {fmesh} km')
+    return fmesh
+
 def getScalingRelation(conf):
     '''
     Returns the ScalingRelation class using configuration file input.
-    Allowing for extension to other scaling relations. However, all will require an Ext class to 
+    Allowing for extension to other scaling relations. However, all will require an Ext class to
     provide length and width rather than area.
     Args:
     - conf: configuration dictionary
@@ -108,103 +167,6 @@ def getScalingRelation(conf):
     else:
         return Leonard2014_Interplate_Ext.Leonard2014_Interplate_Ext()
 
-
-def importConfig(fname):
-    '''
-    Imports a configuration file into a python dictionary. 
-    Configuration file format expected (json) so that 'eval' works.
-    Lines beginning with # are ignored.
-    Args:
-    - fname: filename
-    Return:
-    - Dictionary with contents of configuration file
-    '''
-    fin = open(fname, 'r')
-    text = fin.read()
-    ntext = ''
-    fin.close()
-    for l in text.split('\n'):
-        l = l.rstrip().lstrip()
-        if l.startswith('#'):
-            continue
-        ntext += l
-    ddict = eval(ntext)
-    return ddict
-
-
-def setFaultMeshSpacing(evconf, flen):
-    '''
-    Set the fault mesh spacing based on configuration parameter, or fault
-    length if parameter not set, or too large.
-    Args:
-    - evconf: event configuration
-    - flen: fault length computed from fault description
-    Return:
-    - fmesh: fault mesh spacing
-    '''
-    if 'fault_mesh_spacing' in evconf['evmech']:
-        fmesh = evconf['evmech']['fault_mesh_spacing']
-    else:
-        fmesh = 1.
-    logging.info(f'Fault mesh spacing set to: {fmesh} km')
-    if flen/fmesh < 3.:
-        fmesh = flen/3.
-        logging.warn(f'Resetting fault mesh spacing to finer value: {fmesh} km')
-    return fmesh
-
-
-def importRuptureContext(evconf):
-    '''
-    Creates RuptureContext based on configuration file input for a fault mesh
-    Args:
-    - evconf: event configuration
-    Return:
-    - rctx: RuptureContext for rupture
-    - faultplane: ComplexFaultSurface for rupture
-    '''
-    from json import JSONDecoder
-    if not os.path.isfile(evconf['evmech']['geometry']):
-        logging.warn(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
-        return None, None, None
-    with open(evconf['evmech']['geometry'], 'r') as fin:
-        rup = JSONDecoder().decode(fin.read())
-    evconf['mag'] = rup['metadata']['mag']
-    if 'evloc' not in evconf:
-        evconf['evloc'] = {}
-    evconf['evloc']['centroid_lat'] = rup['metadata']['lat']
-    evconf['evloc']['centroid_lon'] = rup['metadata']['lon']
-    evconf['evloc']['hypo_depth'] = rup['metadata']['depth']
-    ptlist = []
-    allpts = len(rup['features'][0]['geometry']['coordinates'][0][0])
-    for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
-        ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
-    topedge = ptlist[:allpts//2]
-    bottomedge = ptlist[allpts//2:-1][::-1]
-    flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth, 
-        topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
-    fmesh = setFaultMeshSpacing(evconf, flen)
-    faultplane = ComplexFaultSurface.from_fault_data(
-            edges=[Line(topedge), Line(bottomedge)],
-            mesh_spacing=fmesh)
-    rctx = RuptureContext()
-    rctx.strike = faultplane.get_strike()
-    evconf['evmech']['strike'] = rctx.strike
-    rctx.rake = evconf['evmech']['rake']
-    rctx.dip = evconf['evmech']['dip']
-    rctx.mag = evconf['mag']
-    rctx.hypo_depth = evconf['evloc']['hypo_depth']
-    rctx.width = faultplane.get_width()
-#    rctx.width = geodetic.distance(ptlist[0].longitude, ptlist[0].latitude, ptlist[0].depth, 
-#            ptlist[-2].longitude, ptlist[-2].latitude, ptlist[-2].depth)
-    rctx.ztor = 0.1
-    if False:
-        import matplotlib.pyplot as plt
-        plt.plot([p.longitude for p in ptlist], [p.latitude for p in ptlist])
-        plt.scatter(faultplane.mesh.lons, faultplane.mesh.lats)
-        plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
-    return evconf, [rctx], [faultplane]
-
-
 def getKaklamanosCentroidDepth(rctx):
     '''
     Centroid using Kaklamanos et al. (2010)
@@ -220,6 +182,49 @@ def getKaklamanosCentroidDepth(rctx):
     else:
         return 11.24 - (0.2 * rctx.mag) # Kaklamanos eq.4 non-SS
 
+def createRuptures(evconf, calcconf):
+    '''
+    Create rupture based on geometry or basic fault parameters
+    Args:
+    - evconf
+    - calcconf
+    Return:
+    - rups: dictionary of ruptures
+    '''
+    # Single fixed event rupture
+    if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
+            and evconf['evmech']['geometry'].split('.')[-1] == 'json':
+        logger.info('Computing for single 3D fault geometry, so ensure no magnitude loop')
+        if 'magrange' not in calcconf:
+            calcconf['magrange'] = {}
+        calcconf['magrange']['magstep'] = 10.
+        calcconf['magrange']['magmax'] = calcconf['magrange']['magmin'] = 0.
+        evconf, l_rctx, l_faultplane = importRuptureContext(evconf)
+        l_mag = [evconf['mag']]
+    elif 'magrange' in calcconf:
+        l_mag = np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
+            calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep'])
+    elif 'flenrange' in calcconf:
+        l_flen = np.arange(calcconf['flenrange']['flenmin'], calcconf['flenrange']['flenmax'] + \
+            calcconf['flenrange']['flenstep']/2, calcconf['flenrange']['flenstep'])
+        scalrel = getScalingRelation(calcconf)
+        l_mag = [scalrel.get_median_mag_from_length(flen, evconf['evmech']['rake']) for flen in l_flen]
+    rups = {}
+    for mag in l_mag:
+        if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
+            if evconf['evmech']['geometry'].split('.')[-1] == 'geojson':
+                evconf['mag'] = mag
+                l_rctx, l_faultplane = createSubFaultRuptureContexts(evconf, calcconf)
+                if l_rctx is None:
+                    return rups
+        else:
+            evconf['mag'] = mag
+            l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
+        rups[mag] = {}
+        for rctx, faultplane in zip(l_rctx, l_faultplane):
+            centroid = faultplane.get_middle_point()
+            rups[mag][(centroid.latitude, centroid.longitude)] = [rctx, faultplane]
+    return rups
 
 def adjustRCTXparams(rctx, seismogenic_depth, centroid_depth):
     '''
@@ -265,39 +270,56 @@ def adjustRCTXparams(rctx, seismogenic_depth, centroid_depth):
         maxz = centroid_depth + offset
     return rctx, maxz, centroid_depth
 
-
-def createCentroidPolygon(calcconf, centroids):
+def importRuptureContext(evconf):
     '''
-    Create a polygon around an input set of centroids
+    Creates RuptureContext based on configuration file input for a fault mesh
     Args:
-    - calcconf: calculation configuration
-    - centroids: list of [lon, lat] points
+    - evconf: event configuration
     Return:
-    -  polygon
+    - rctx: RuptureContext for rupture
+    - faultplane: ComplexFaultSurface for rupture
     '''
-    if len(centroids) < 2:
-        # This should be a circle if 1 point
-        return None
-    if 'centroid_polygon_dist' not in calcconf['fault-specific']:
-        return None
-
-    import shapely as shp
-    import shapely.ops as ops
-    import pyproj
-    # Set up the projections
-    wgs84 = pyproj.Proj(init='epsg:4326')
-    nz = pyproj.Proj(init=f'epsg:{calcconf["fault-specific"]["epsg"]}')
-    project = pyproj.Transformer.from_proj(wgs84, nz)
-    rev_project = pyproj.Transformer.from_proj(nz, wgs84)
-    # Create line and buffer
-    line = shp.geometry.LineString(centroids)
-    line_cart = ops.transform(project.transform, line)
-    xcorr = calcconf['fault-specific']['centroid_polygon_dist']
-    poly_cart = line_cart.buffer(xcorr * 1000, cap_style=1)
-    poly = ops.transform(rev_project.transform, poly_cart)
-    npoly = poly.simplify(0.01, preserve_topology=False)
-    return npoly
-
+    from json import JSONDecoder
+    if not os.path.isfile(evconf['evmech']['geometry']):
+        logging.warn(f'Specified geometry file {evconf["evmech"]["geometry"]} is not found')
+        return None, None, None
+    with open(evconf['evmech']['geometry'], 'r') as fin:
+        rup = JSONDecoder().decode(fin.read())
+    evconf['mag'] = rup['metadata']['mag']
+    if 'evloc' not in evconf:
+        evconf['evloc'] = {}
+    evconf['evloc']['centroid_lat'] = rup['metadata']['lat']
+    evconf['evloc']['centroid_lon'] = rup['metadata']['lon']
+    evconf['evloc']['hypo_depth'] = rup['metadata']['depth']
+    ptlist = []
+    allpts = len(rup['features'][0]['geometry']['coordinates'][0][0])
+    for pt in rup['features'][0]['geometry']['coordinates'][0][0]:
+        ptlist.append(Point(depth=pt[2], latitude=pt[1], longitude=pt[0]))
+    topedge = ptlist[:allpts//2]
+    bottomedge = ptlist[allpts//2:-1][::-1]
+    flen = geodetic.distance(topedge[0].longitude, topedge[0].latitude, topedge[0].depth,
+        topedge[-1].longitude, topedge[-1].latitude, topedge[-1].depth)
+    fmesh = setFaultMeshSpacing(evconf, flen)
+    faultplane = ComplexFaultSurface.from_fault_data(
+            edges=[Line(topedge), Line(bottomedge)],
+            mesh_spacing=fmesh)
+    rctx = RuptureContext()
+    rctx.strike = faultplane.get_strike()
+    evconf['evmech']['strike'] = rctx.strike
+    rctx.rake = evconf['evmech']['rake']
+    rctx.dip = evconf['evmech']['dip']
+    rctx.mag = evconf['mag']
+    rctx.hypo_depth = evconf['evloc']['hypo_depth']
+    rctx.width = faultplane.get_width()
+#    rctx.width = geodetic.distance(ptlist[0].longitude, ptlist[0].latitude, ptlist[0].depth,
+#            ptlist[-2].longitude, ptlist[-2].latitude, ptlist[-2].depth)
+    rctx.ztor = 0.1
+    if False:
+        import matplotlib.pyplot as plt
+        plt.plot([p.longitude for p in ptlist], [p.latitude for p in ptlist])
+        plt.scatter(faultplane.mesh.lons, faultplane.mesh.lats)
+        plt.savefig(evconf['evmech']['geometry'].replace('.json', '.png'))
+    return evconf, [rctx], [faultplane]
 
 def createSubFaultRuptureContexts(evconf, calcconf):
     '''
@@ -418,7 +440,6 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         l_rctx.append(rctx)
     return l_rctx, l_faultplane
 
-
 def createRuptureContext(evconf, calcconf):
     '''
     Creates RuptureContext based on configuration file input for a simple, single planar surface
@@ -446,6 +467,7 @@ def createRuptureContext(evconf, calcconf):
     if centroid_depth is None:
         centroid_depth = getKaklamanosCentroidDepth(rctx)
     flen = scalrel.get_median_length(rctx.mag, rctx.rake)
+    print(rctx.mag, flen)
     fwid = scalrel.get_median_width(rctx.mag, rctx.rake)
     # Note that mag range extends width relation beyond validity, so fix assumes
     # len = wid when wid > len, i.e. aspect ratio 1.
@@ -484,6 +506,9 @@ def createRuptureContext(evconf, calcconf):
     #logger.info(f'fptest: {fptest.get_surface_boundaries()}') 
     return [rctx], [faultplane]
 
+# --------------------------------------------------------------------------
+# Distance Context
+# --------------------------------------------------------------------------
 
 def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
@@ -496,7 +521,6 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     - bPlots: boolean to control plot generation
     Return:
     - dctx: DistanceContext for the list of points
-    - sctx: SitesContext for the list of points
     '''
     if not os.path.isfile(calcconf['points']['points_file']):
         return None, None
@@ -526,6 +550,8 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
     dctx.rx = faultplane.get_rx_distance(mesh)
     dctx.ry0 = faultplane.get_ry0_distance(mesh)
     dctx.rrup = faultplane.get_min_distance(mesh).reshape(mesh.shape)
+    sctx = createSiteContext(dctx.rjb.shape, lvs30)
+
     if bPlots:
         import matplotlib.pyplot as plt
         flat = []
@@ -548,19 +574,7 @@ def make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = False):
             plt.colorbar(cb)
             plt.savefig('%s_M%.1f_Azi%d.png' % (lbl, evconf['mag'], rctx.strike))
             plt.close()
-    # --------------------------------------------------------------------------
-    # Site context
-    # --------------------------------------------------------------------------
-    sctx = SitesContext()
-    sctx.sids = np.arange(len(dctx.rjb))
-    sctx.vs30 = np.asarray(lvs30)
-    sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
-    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
-    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
-    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
-    sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
     return dctx, sctx
-
 
 def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
@@ -574,11 +588,7 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     - bPlots: boolean to control plot generation
     Return:
     - dctx: DistanceContext for the list of points
-    - sctx: SitesContext for the list of points
     '''
-    # --------------------------------------------------------------------------
-    # Distance context
-    # --------------------------------------------------------------------------
     rjbmin = calcconf['pt']['rjblogmin']
     rjbmax = calcconf['pt']['rjblogmax']
     rjbnum = ((rjbmax - rjbmin)/calcconf['pt']['rjblogstep']) + 1
@@ -593,19 +603,7 @@ def make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = False):
     dctx.rx = dctx.rjb
     dctx.ry0 = np.zeros_like(dctx.rjb)
     dctx.rrup = dctx.rjb
-    # --------------------------------------------------------------------------
-    # Site context
-    # --------------------------------------------------------------------------
-    sctx = SitesContext()
-    sctx.sids = np.arange(dctx.rjb.shape[0]).reshape(dctx.rjb.shape)
-    sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['pt']['vs30']
-    sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
-    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
-    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
-    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
-    sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
-    return dctx, sctx
-
+    return dctx
 
 def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     '''
@@ -631,7 +629,6 @@ def mesh_from_bb(calcconf, minlat, maxlat, minlon, maxlon):
     lons, lats = np.meshgrid(inlons, inlats)
     mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
     return mesh
-
 
 def make_mesh(evconf, calcconf, faultplane):
     '''
@@ -673,7 +670,6 @@ def make_mesh(evconf, calcconf, faultplane):
     mesh = Mesh(lons=lons.ravel(), lats=lats.ravel(), depths=None)
     return mesh
 
-
 def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     '''
     Create Distance and Sites Contexts for a grid of points, fixed vs30
@@ -685,15 +681,11 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
     - bPlots: boolean to control plot generation
     Return:
     - dctx: DistanceContext for the list of points
-    - sctx: SitesContext for the list of points
     '''
     if 'mesh' not in calcconf:
         mesh = make_mesh(evconf, calcconf, faultplane)
     else:
         mesh = calcconf['mesh']
-    # --------------------------------------------------------------------------
-    # Distance context
-    # --------------------------------------------------------------------------
     dctx = DistancesContext()
     dctx.rjb = faultplane.get_joyner_boore_distance(mesh)
     dctx.rjb_var = None
@@ -725,63 +717,32 @@ def make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = False):
             plt.colorbar(cb)
             plt.savefig('%s_M%.1f.png' % (lbl, evconf['mag']))
             plt.close()
-    # --------------------------------------------------------------------------
-    # Site context
-    # --------------------------------------------------------------------------
-    sctx = SitesContext()
-    #sctx.sids = np.arange(nc*nr).reshape(dctx.rjb.shape)
-    sctx.sids = np.arange(len(dctx.rjb))
-    sctx.vs30 = np.ones_like(dctx.rjb) * calcconf['grid']['vs30']
-    sctx.vs30measured = np.full_like(dctx.rjb, False, dtype="bool")
-    sctx.z1pt0_ask14_cal = sites.Sites._z1pt0_from_vs30_ask14_cal(sctx.vs30)
-    sctx.z1pt0_cy14_cal = sites.Sites._z1pt0_from_vs30_cy14_cal(sctx.vs30)
-    sctx.z2pt5_cb14_cal = sites.Sites._z2pt5_from_vs30_cb14_cal(sctx.vs30) / 1000.0
-    sctx.backarc = np.zeros_like(dctx.rjb, dtype=np.int16) # forearc/backarc is unknown
-    return dctx, sctx, nr, nc
+    return dctx, nr, nc
 
+# --------------------------------------------------------------------------
+# Compute Ground Motion
+# --------------------------------------------------------------------------
 
-def createRuptures(evconf, calcconf):
+def ln2log(inx):
     '''
-    Create rupture based on geometry or basic fault parameters
+    Convert PGV in ln(m/s) to log10(m/s)
     Args:
-    - 
+    - Numpy array of PGV values in ln(m/s)
     Return:
-    - 
+    - Numpy array of PGV values in log10(m/s)
     '''
-    # --------------------------------------------------------------------------
-    # Set rupture basics
-    # --------------------------------------------------------------------------
-    if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
-            and evconf['evmech']['geometry'].split('.')[-1] == 'json':
-        logger.info('Computing for single 3D fault geometry, so ensure no magnitude loop')
-        if 'magrange' not in calcconf:
-            calcconf['magrange'] = {}
-        calcconf['magrange']['magstep'] = 10.
-        calcconf['magrange']['magmax'] = calcconf['magrange']['magmin'] = 0.
-    rups = {}
-    for mag in np.arange(calcconf['magrange']['magmin'], calcconf['magrange']['magmax'] + \
-            calcconf['magrange']['magstep']/2, calcconf['magrange']['magstep']):
-        # --------------------------------------------------------------------------
-        # Rupture context
-        # --------------------------------------------------------------------------
-        if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
-            if evconf['evmech']['geometry'].split('.')[-1] == 'json':
-                evconf, l_rctx, l_faultplane = importRuptureContext(evconf)
-                mag = evconf['mag']
-            elif evconf['evmech']['geometry'].split('.')[-1] == 'geojson': 
-                evconf['mag'] = mag
-                l_rctx, l_faultplane = createSubFaultRuptureContexts(evconf, calcconf)        
-                if l_rctx is None:
-                    return rups
-        else:
-            evconf['mag'] = mag
-            l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
-        rups[mag] = {}
-        for rctx, faultplane in zip(l_rctx, l_faultplane): 
-            centroid = faultplane.get_middle_point()
-            rups[mag][(centroid.latitude, centroid.longitude)] = [rctx, faultplane]
-    return rups
+    return np.log10(np.exp(inx))
 
+def lng2cm(inx):
+    '''
+    Convert PGA in ln(g) to log10(cm/s/s)
+    Args:
+    - Numpy array of PGA values in ln(g)
+    Return:
+    - Numpy array of PGA values in log10(cm/s/s)
+    '''
+    inx = np.log10(np.exp(inx)) + log10(980.665)
+    return inx
 
 def computeGM(gmpeconf, evconf, calcconf):
     '''
@@ -855,11 +816,13 @@ def computeGM(gmpeconf, evconf, calcconf):
                             calcconf['mesh'] = template_sets[i]['mesh']
                             if stn_mesh is not None:
                                 calcconf['mask'] = template_sets[i]['mask']
-                dctx, sctx, nr, nc = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+                dctx, nr, nc = make_pga_grid(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+                sctx = createSiteContext(dctx.rjb.shape, calcconf['grid']['vs30'])
             if 'points' in calcconf and calcconf['points']['compute']:
                 dctx, sctx = make_pga_lop(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
             if 'pt' in calcconf and calcconf['pt']['compute']:
-                dctx, sctx = make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+                dctx = make_pga_pt(evconf, calcconf, rctx, faultplane, bPlots = calcconf['plots'])
+                sctx = createSiteContext(dctx.rjb.shape, calcconf['pt']['vs30'])
             # --------------------------------------------------------------------------
             # Compute ground motion
             # --------------------------------------------------------------------------
@@ -898,6 +861,10 @@ def computeGM(gmpeconf, evconf, calcconf):
                 ogrid_msd = apply_mask(ogrid_msd, calcconf, -4.)
             gm[mag][(centroid_lat, centroid_lon)] = [ogrid, faultplane, dctx.rjb, ogrid_psd, ogrid_msd]
     return gm, evconf, template_sets
+
+# --------------------------------------------------------------------------
+# FinDer Configuration Files
+# --------------------------------------------------------------------------
 
 def apply_mask(ingrid, calcconf, maskedval):
     '''
@@ -1020,90 +987,36 @@ def createTemplateSets(data, calcconf):
             template_sets[i][mag] = templs
     return template_sets
 
+def createCentroidPolygon(calcconf, centroids):
+    '''
+    Create a polygon around an input set of centroids
+    Args:
+    - calcconf: calculation configuration
+    - centroids: list of [lon, lat] points
+    Return:
+    -  polygon
+    '''
+    if len(centroids) < 2:
+        # This should be a circle if 1 point
+        return None
+    if 'centroid_polygon_dist' not in calcconf['fault-specific']:
+        return None
 
-##################################################################################################
-# ORIGINAL VERSION OF DCTX THAT EXPLOITED SYMMETRY FOR A VERTICAL FAULT
-#        dctx = DistancesContext()
-#        rjb = []
-#        rhypo = []
-#        ry0 = []
-#        rx = []
-#        rrup = []
-#        for x in np.arange(0., maxdist+(dkm/2.), dkm):
-#            topside = 0
-#            for y in np.arange(0., maxdist+(dkm/2.), dkm):
-#                topside += 1
-#                rjb.append(sqrt(pow(x,2) + pow(y,2)))
-#                rhypo.append(sqrt(pow(x,2.) + pow(y+(flen/2),2.) + pow(rctx.centroid_depth,2.)))
-#                ry0.append(y)
-#                rx.append(x + xcorr_fw)
-#        for x in np.arange(0., maxdist+(dkm/2.), dkm):
-#            bottomside = 0
-#            for y in np.arange(dkm - (flen % dkm), maxdist+(dkm/2.), dkm):
-#                bottomside += 1
-#                rjb.append(sqrt(pow(x,2.) + pow(y,2.)))
-#                rhypo.append(sqrt(pow(x,2.) + pow(y+(flen/2.),2.) + pow(rctx.centroid_depth,2.)))
-#                ry0.append(y)
-#                rx.append(x + xcorr_fw)
-#        if rctx.ztor == 0.:
-#            rrup = rjb
-#        else:
-#            rrup = [sqrt(pow(d,2.)+pow(rctx.ztor,2.)) for d in rjb]
-#        dctx.rrup = np.asarray(rrup)
-#        dctx.rjb = np.asarray(rjb)
-#        dctx.rjb_var = None
-#        dctx.rrup_var = None
-#        dctx.rhypo = np.asarray(rhypo)
-#        dctx.rx = np.asarray(rx) 
-#        dctx.ry0 = np.asarray(ry0)
+    import shapely as shp
+    import shapely.ops as ops
+    import pyproj
+    # Set up the projections
+    wgs84 = pyproj.Proj(init='epsg:4326')
+    nz = pyproj.Proj(init=f'epsg:{calcconf["fault-specific"]["epsg"]}')
+    project = pyproj.Transformer.from_proj(wgs84, nz)
+    rev_project = pyproj.Transformer.from_proj(nz, wgs84)
+    # Create line and buffer
+    line = shp.geometry.LineString(centroids)
+    line_cart = ops.transform(project.transform, line)
+    xcorr = calcconf['fault-specific']['centroid_polygon_dist']
+    poly_cart = line_cart.buffer(xcorr * 1000, cap_style=1)
+    poly = ops.transform(rev_project.transform, poly_cart)
+    npoly = poly.simplify(0.01, preserve_topology=False)
+    return npoly
 
-#       This exploits symmetry and is only applicable for vertical strike slip faults
-#        print(pow(10., min(lmean_mgmpe[:topside])), pow(10., max(lmean_mgmpe[:topside])))
-#        templ_top = np.ones((topside, (topside*2)-1), np.float64)
-#        i = 0
-#        for x in range(topside):
-#            for y in range(x, topside):
-#                templ_top[topside-1-y][topside-1+x] = lmean_mgmpe[i]
-#                templ_top[topside-1-y][topside-1-x] = lmean_mgmpe[i]
-#                i += 1
-#        if flen > dkm: # duplicate the zeroth data along the length of the fault
-#            templ_mid = np.ones((floor(flen/dkm), (topside*2)-1))
-#            for x in range(topside):
-#                for y in range(floor(flen/dkm)):
-#                    templ_mid[y][topside-1-x] = lmean_mgmpe[x]
-#                    templ_mid[y][topside-1+x] = lmean_mgmpe[x]
-#        templ_bottom = np.ones((bottomside, (topside*2)-1), np.float64)
-#        for x in range(topside):
-#            for y in range(bottomside):
-#                templ_bottom[y][topside-1+x] = lmean_mgmpe[i]
-#                templ_bottom[y][topside-1-x] = lmean_mgmpe[i]
-#                i += 1
-#        if flen > dkm: # duplicate the zeroth data along the length of the fault
-#            templ_all = np.vstack((templ_top, templ_mid, templ_bottom))
-#        else:
-#            templ_all = np.vstack((templ_top, templ_bottom))
 
-###
-### Code to compute rrup geometrically
-# Originally for long faults, the get_min_distance function 
-# appears to only use the corners to 
-# compute horizontal distance, resulting in Rrup >> actual
-###
-#    if rctx.dip == 90.:
-#        dctx.rrup = np.sqrt(np.square(dctx.rjb) + pow(rctx.ztor,2))
-#    else:
-#        diprad = radians(rctx.dip)
-#        # Very frustrating that we have to do this!
-#        # Eq 14-20 Kaklamanos et al. (2011)
-#        Acond = rctx.ztor * tan(diprad)
-#        A = pow(rctx.ztor,2)
-#        Arrupp = np.where(dctx.rx < Acond, np.sqrt(np.square(dctx.rx) + A), 0)
-#        Ccond = Acond + (rctx.width / cos(diprad))
-#        A = rctx.width * cos(diprad)
-#        B = pow(rctx.ztor + (rctx.width * sin(diprad)), 2)
-#        Crrupp = np.where(dctx.rx > Ccond, np.sqrt(np.square(dctx.rx - A) + B), 0)
-#        A = sin(diprad)
-#        B = rctx.ztor * cos(diprad)
-#        Brrupp = np.where(np.logical_and(dctx.rx >= Acond, dctx.rx <= Ccond), (dctx.rx * A) + B, 0)
-#        rrupp = Arrupp + Brrupp + Crrupp
-#        dctx.rrup = np.sqrt(np.square(rrupp) + np.square(dctx.ry0))

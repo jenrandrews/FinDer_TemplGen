@@ -48,9 +48,9 @@ if __name__ == "__main__":
         dest='calcconf', help='Calculation configuration file')
     args = parser.parse_args()
 
-    gmpeconf = woq.importConfig(args.gmpeconf)
-    evconf = woq.importConfig(args.evconf)
-    calcconf = woq.importConfig(args.calcconf)
+    gmpeconf = woq.rdConfig(args.gmpeconf)
+    evconf = woq.rdConfig(args.evconf)
+    calcconf = woq.rdConfig(args.calcconf)
     rdir = evconf['evmech']['geometry']
     if os.path.isdir(rdir):
         rlist = [os.path.join(rdir, r) for r in sorted(os.listdir(rdir))]
