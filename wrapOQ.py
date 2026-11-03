@@ -192,6 +192,7 @@ def createRuptures(evconf, calcconf):
     - rups: dictionary of ruptures
     '''
     # Single fixed event rupture
+    l_flen = []
     if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']) \
             and evconf['evmech']['geometry'].split('.')[-1] == 'json':
         logger.info('Computing for single 3D fault geometry, so ensure no magnitude loop')
@@ -210,7 +211,7 @@ def createRuptures(evconf, calcconf):
         scalrel = getScalingRelation(calcconf)
         l_mag = [scalrel.get_median_mag_from_length(flen, evconf['evmech']['rake']) for flen in l_flen]
     rups = {}
-    for mag in l_mag:
+    for i, mag in enumerate(l_mag):
         if 'geometry' in evconf['evmech'] and os.path.isfile(evconf['evmech']['geometry']):
             if evconf['evmech']['geometry'].split('.')[-1] == 'geojson':
                 evconf['mag'] = mag
@@ -219,7 +220,10 @@ def createRuptures(evconf, calcconf):
                     return rups
         else:
             evconf['mag'] = mag
-            l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
+            if len(l_flen) > 0:
+                l_rctx, l_faultplane = createRuptureContext(evconf, calcconf, l_flen[i])
+            else:
+                l_rctx, l_faultplane = createRuptureContext(evconf, calcconf)
         rups[mag] = {}
         for rctx, faultplane in zip(l_rctx, l_faultplane):
             centroid = faultplane.get_middle_point()
@@ -440,7 +444,7 @@ def createSubFaultRuptureContexts(evconf, calcconf):
         l_rctx.append(rctx)
     return l_rctx, l_faultplane
 
-def createRuptureContext(evconf, calcconf):
+def createRuptureContext(evconf, calcconf, flen = None):
     '''
     Creates RuptureContext based on configuration file input for a simple, single planar surface
     defined by centroid latitude and longitude, strike, dip and rake. Magnitude and scaling 
@@ -466,8 +470,8 @@ def createRuptureContext(evconf, calcconf):
     diprad = radians(rctx.dip)
     if centroid_depth is None:
         centroid_depth = getKaklamanosCentroidDepth(rctx)
-    flen = scalrel.get_median_length(rctx.mag, rctx.rake)
-    print(rctx.mag, flen)
+    if flen is None:
+        flen = scalrel.get_median_length(rctx.mag, rctx.rake)
     fwid = scalrel.get_median_width(rctx.mag, rctx.rake)
     # Note that mag range extends width relation beyond validity, so fix assumes
     # len = wid when wid > len, i.e. aspect ratio 1.
